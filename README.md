@@ -11,9 +11,10 @@ modification** ; ce dépôt n'ajoute que la colle nécessaire pour Circle
 `SOURCES.md`.
 
 État : BASIC 1.1, HIRES, couleurs, son, clavier USB (AZERTY), cassette `.tap`,
-disquettes Microdisc. Environ 13 ms d'émulation par trame de 20 ms sur un
-Pi Zero d'origine. Pas d'ACIA/modem ni de réseau ; l'émulation LOCI de
-Phosphoric est trop lourde pour le Zero.
+disquettes Microdisc, cartouche LOCI en option (émulation de haut niveau de
+Phosphoric : menu, API fichiers). Pas d'ACIA/modem ni de réseau.
+Sur un Pi Zero d'origine : environ 13 ms par trame de 20 ms sans LOCI, mais
+le LOCI dépasse le budget (≈ 23 ms) ; il vise un Pi 3 ou plus.
 
 ## Construire
 
@@ -45,14 +46,26 @@ cmdline.txt   config.txt                ← sdcard/
 oric/basic11b.rom                       ← ROM Atmos (non fournie)
 oric/microdis.rom, oric/xxx.dsk         ← optionnel (Microdisc)
 oric/xxx.tap                            ← optionnel (cassette)
+oric/loci/locirom                       ← avec LOCI : phosphoric/roms/loci/
+oric/loci/basic11b.rom, microdis.rom    ← avec LOCI (non fournies)
+oric/usb/                               ← avec LOCI : vos .dsk, .tap…
 ```
+
+Avec LOCI, `oric/loci/` est sa mémoire flash interne (« 0: ») et
+`oric/usb/` sa clé USB (« 1: »).
 
 Options de `cmdline.txt` (une seule ligne) : `width=240 height=224`,
 `keymap=FR` (AZERTY), `rom=`, `diskrom=` + `disk=` (les deux pour activer le
 Microdisc), `tape=`, `fdctiming=fast` (Microdisc sans délais mécaniques ; par
 défaut `real`, vitesse du vrai lecteur).
 
-Touches : F5 = reset, Maj+F5 = NMI, F12 = mesure de performance dans
+LOCI : `loci=1`, et **pas** de `rom=` : la ROM système est alors le menu
+(`oric/loci/locirom`). `lociflash=` et `lociusb=` changent les deux
+dossiers. Menu : flèches, Espace pour ouvrir/choisir, Échap pour démarrer
+l'Oric.
+
+Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action du LOCI (retour au
+menu), F12 = mesure de performance dans
 `oric/perf.txt`.
 
 ## Merci

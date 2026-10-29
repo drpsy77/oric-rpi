@@ -37,6 +37,14 @@ private:
 	volatile bool m_bNMIRequest;
 	volatile bool m_bPerfRequest;
 
+	// LOCI : bouton Action (F8) et rapport clavier HID, appliqués hors interruption
+	volatile bool m_bLociDown;
+	volatile bool m_bLociUp;
+	volatile bool m_bHIDChanged;
+	volatile unsigned char m_ucHIDModifiers;
+	volatile unsigned char m_HIDKeys[6];
+	bool m_bF8Held;
+
 	// Mesure de performance (F12 -> oric/perf.txt)
 	unsigned m_nLastAvg, m_nLastMax, m_nLastSkipped;	// dernière fenêtre de 10 s
 	unsigned m_nWorst, m_nWindows;				// depuis le démarrage

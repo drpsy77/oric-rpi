@@ -1,1 +1,1 @@
-width=240 height=224 keymap=FR loci=1 rom=oric/basic11b.rom romdisc=microdis.rom
+width=240 height=224 keymap=FR loci=1

@@ -18,8 +18,11 @@
 //   tape=oric/xxx.tap             cassette, lue par CLOAD""
 //   fdctiming=fast                Microdisc sans délais mécaniques
 //                                 (défaut real = vitesse du vrai lecteur)
-// Touches : F5 = reset, Maj+F5 = NMI (comme Phosphoric),
-//           F12 = écrit la mesure de performance dans oric/perf.txt.
+//   loci=1                        cartouche LOCI ; ROM par défaut : son menu
+//   lociflash=oric/loci           mémoire flash interne « 0: » (défaut)
+//   lociusb=oric/usb              clé USB « 1: » (défaut)
+// Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action de LOCI (comme
+//           Phosphoric), F12 = écrit la mesure de performance dans oric/perf.txt.
 //
 #include "kernel.h"
 #include "oric_machine.h"
@@ -50,6 +53,11 @@ CKernel::CKernel (void)
 	m_bResetRequest (false),
 	m_bNMIRequest (false),
 	m_bPerfRequest (false),
+	m_bLociDown (false),
+	m_bLociUp (false),
+	m_bHIDChanged (false),
+	m_ucHIDModifiers (0),
+	m_bF8Held (false),
 	m_nLastAvg (0), m_nLastMax (0), m_nLastSkipped (0),
 	m_nWorst (0), m_nWindows (0)
 {
@@ -73,7 +81,15 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 
 	oric_media_t Media;
 	memset (&Media, 0, sizeof Media);
-	Media.rom_file      = mOptions.GetAppOptionString ("rom", "oric/basic11b.rom");
+	Media.loci = mOptions.GetAppOptionDecimal ("loci", 0) == 1;
+	Media.loci_flash_dir = mOptions.GetAppOptionString ("lociflash", "oric/loci");
+	Media.loci_usb_dir   = mOptions.GetAppOptionString ("lociusb", "oric/usb");
+
+	// ROM système : rom= ; à défaut, le menu LOCI (si LOCI) ou le BASIC 1.1
+	static char LociMenuROM[128];
+	snprintf (LociMenuROM, sizeof LociMenuROM, "%s/locirom", Media.loci_flash_dir);
+	Media.rom_file = mOptions.GetAppOptionString ("rom",
+				Media.loci ? LociMenuROM : "oric/basic11b.rom");
 	Media.tape_file     = mOptions.GetAppOptionString ("tape");
 	Media.fdc_timing    = mOptions.GetAppOptionString ("fdctiming");	// fast | real
 	const char *pDisk    = mOptions.GetAppOptionString ("disk");
@@ -117,6 +133,26 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		{
 			m_bPerfRequest = false;
 			WritePerf ();
+		}
+		if (m_bLociDown)
+		{
+			m_bLociDown = false;
+			oric_machine_loci_button (true);
+		}
+		if (m_bLociUp)
+		{
+			m_bLociUp = false;
+			oric_machine_loci_button (false);
+		}
+		if (m_bHIDChanged)
+		{
+			m_bHIDChanged = false;
+			unsigned char Keys[6];
+			for (unsigned i = 0; i < 6; i++)
+			{
+				Keys[i] = m_HIDKeys[i];
+			}
+			oric_machine_loci_kbd_report (m_ucHIDModifiers, Keys);
 		}
 
 		// Émulation d'une trame + son correspondant
@@ -277,6 +313,33 @@ static unsigned char AzertyToQwerty (unsigned char ucKey)
 // la matrice (actif bas, comme oric_keyboard_t.matrix de Phosphoric).
 void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
+	// Rapport brut transmis tel quel à LOCI (appliqué dans la boucle principale)
+	s_pThis->m_ucHIDModifiers = ucModifiers;
+	for (unsigned i = 0; i < 6; i++)
+	{
+		s_pThis->m_HIDKeys[i] = RawKeys[i];
+	}
+	s_pThis->m_bHIDChanged = true;
+
+	// F8 = bouton Action de LOCI : appui et relâchement
+	bool bF8 = false;
+	for (unsigned i = 0; i < 6; i++)
+	{
+		if (RawKeys[i] == 0x41)
+		{
+			bF8 = true;
+		}
+	}
+	if (bF8 && !s_pThis->m_bF8Held)
+	{
+		s_pThis->m_bLociDown = true;
+	}
+	else if (!bF8 && s_pThis->m_bF8Held)
+	{
+		s_pThis->m_bLociUp = true;
+	}
+	s_pThis->m_bF8Held = bF8;
+
 	unsigned char Matrix[8];
 	memset (Matrix, 0xFF, sizeof Matrix);
 
