@@ -1,0 +1,4 @@
+# config.txt — Pi Zero / Zero W, kernel.img (Circle, 32 bits)
+# Aucun réglage n'est indispensable. Décommenter si l'écran est vu comme DVI
+# (pas de son HDMI) : force le mode HDMI, donc le son.
+#hdmi_drive=2

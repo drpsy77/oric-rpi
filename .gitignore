@@ -1,0 +1,24 @@
+# Produits de compilation (aussi dans phosphoric/)
+*.o
+*.d
+*.elf
+*.lst
+*.map
+kernel*.img
+
+# Sauvegardes d'éditeur, archives, macOS
+*~
+*.tar.gz
+.DS_Store
+
+# Carte SD de travail : firmware Raspberry Pi, kernel.img compilé, ROM Oric.
+# Le modèle versionné est sdcard/ (cmdline.txt, config.txt).
+carte-sd/
+
+# ROM Oric (droits d'auteur) : à fournir soi-même dans oric/ sur la carte.
+# (phosphoric/roms/loci/locirom, BSD-3, n'a pas d'extension et reste suivi.)
+*.rom
+
+# Copie des sources de Phosphoric : régénérée par importer_phosphoric.sh
+# (voir README.md). Seuls le script et SOURCES.md sont versionnés.
+phosphoric/
