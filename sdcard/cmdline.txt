@@ -1,1 +1,1 @@
-width=240 height=224 keymap=FR loci=1
+width=590 height=448 keymap=FR loci=1

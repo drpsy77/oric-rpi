@@ -10,7 +10,10 @@
 // elle-même reprise d'Oricutron), transposée des codes SDL en codes HID USB.
 //
 // Options dans cmdline.txt (carte SD) :
-//   width=240 height=224          taille native de l'Oric (le GPU agrandit)
+//   width=590 height=448          taille du framebuffer (le GPU agrandit) :
+//                                 590x448 pour pixels=tele, 240x224 pour carres
+//   pixels=tele|carres            forme des points (défaut tele, 1,23:1)
+//   couleurs=tele|pures           couleurs du téléviseur ou 00/FF (défaut tele)
 //   keymap=FR                     clavier AZERTY (lettres A/Q, Z/W, M, ; ,)
 //   rom=oric/basic11b.rom         ROM système (défaut)
 //   diskrom=oric/microdis.rom     ROM du Microdisc  } les deux pour activer
@@ -21,16 +24,27 @@
 //   loci=1                        cartouche LOCI ; ROM par défaut : son menu
 //   lociflash=oric/loci           mémoire flash interne « 0: » (défaut)
 //   lociusb=oric/usb              clé USB « 1: » (défaut)
+//   modem=1                       modem Wi-Fi de LOCI (picowifi de Phosphoric,
+//                                 ACIA en $0380) ; firmware/ et
+//                                 wpa_supplicant.conf à la racine de la carte
+// Journal de Phosphoric : oric/journal.txt (session précédente :
+// oric/journal-precedent.txt). Émulation sur le cœur 1, le reste sur le cœur 0.
 // Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action de LOCI (comme
-//           Phosphoric), F12 = écrit la mesure de performance dans oric/perf.txt.
+//           Phosphoric), F12 = ajoute une mesure de performance à oric/perf.txt.
 //
 #include "kernel.h"
 #include "oric_machine.h"
+#include "journal.h"
+#include "netrelay.h"
 
+#include <circle/machineinfo.h>
+#include <circle/memory.h>
+#include <circle/synchronize.h>
 #include <circle/sound/hdmisoundbasedevice.h>
 #include <circle/timer.h>
 #include <circle/usb/usbhid.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define FRAME_US        ORIC_FRAME_US               // une trame PAL Oric = 20 ms
@@ -45,11 +59,33 @@ static unsigned s_nSamplesFrame;                    // échantillons par trame
 
 CKernel *CKernel::s_pThis = 0;
 
+CEmuCores::CEmuCores (CKernel *pKernel)
+:	CMultiCoreSupport (CMemorySystem::Get ()),
+	m_pKernel (pKernel)
+{
+}
+
+void CEmuCores::Run (unsigned nCore)
+{
+	if (nCore == 1)
+	{
+		m_pKernel->RunEmulation ();
+	}
+}
+
 CKernel::CKernel (void)
-:	CStdlibAppStdio (FromOric),
+:	CStdlibAppNetwork (FromOric, CSTDLIBAPP_DEFAULT_PARTITION, 0, 0, 0, 0, NetDeviceTypeWLAN),
+	m_CPUThrottle (CPUSpeedMaximum),
+	m_EmuCores (this),
+	m_bModem (false),
+	m_bNetStarting (false),
 	m_pKeyboard (0),
 	m_pSound (0),
 	m_bAzerty (false),
+	m_bTeleColors (true),
+	m_nScaleY (1),
+	m_nOutWidth (0), m_nOutHeight (0),
+	m_nOffsetX (0), m_nOffsetY (0),
 	m_bResetRequest (false),
 	m_bNMIRequest (false),
 	m_bPerfRequest (false),
@@ -58,13 +94,62 @@ CKernel::CKernel (void)
 	m_bHIDChanged (false),
 	m_ucHIDModifiers (0),
 	m_bF8Held (false),
+	m_bMachineReady (false),
+	m_nFramesRequested (0),
+	m_nFramesDone (0),
 	m_nLastAvg (0), m_nLastMax (0), m_nLastSkipped (0),
-	m_nWorst (0), m_nWindows (0)
+	m_nWorst (0), m_nWindows (0),
+	m_nPerfCount (0)
 {
 	s_pThis = this;
 	mActLED.Blink (5);	// show we are alive
 }
 
+// Comme CStdlibAppNetwork::InitializeNoWaitForActivate, mais le Wi-Fi n'est
+// démarré qu'avec modem=1, et son échec n'empêche pas l'Oric de démarrer.
+// Le support multicœur se démarre en dernier (doc/multicore.txt de Circle) ;
+// le cœur 1 attend ensuite que Run() ait préparé la machine.
+bool CKernel::Initialize (void)
+{
+	if (!CStdlibAppStdio::Initialize ())
+	{
+		return false;
+	}
+
+	m_bModem = mOptions.GetAppOptionDecimal ("modem", 0) == 1;
+	if (m_bModem)
+	{
+		m_bNetStarting =    mWLAN.Initialize ()
+				 && mNet.Initialize (FALSE)
+				 && mWPASupplicant.Initialize ();
+		if (!m_bNetStarting)
+		{
+			mLogger.Write (FromOric, LogWarning,
+				       "Wi-Fi indisponible (firmware/ et wpa_supplicant.conf sur la carte SD ?)");
+		}
+	}
+
+	return m_EmuCores.Initialize ();
+}
+
+// Cœur 0 : le réseau est prêt dès que le Wi-Fi a une adresse (DHCP).
+void CKernel::UpdateNetwork (void)
+{
+	if (!m_bNetStarting || !mNet.IsRunning ())
+	{
+		return;
+	}
+	m_bNetStarting = false;
+
+	CGlueNetworkInit (mNet);
+	NetRelaySetReady ();
+
+	CString IPAddress;
+	mNet.GetConfig ()->GetIPAddress ()->Format (&IPAddress);
+	JournalPrintf ("Wi-Fi : connecte, adresse %s\n", (const char *) IPAddress);
+}
+
+// Cœur 0 : préparation, puis clavier USB, son, température, carte SD.
 CStdlibApp::TShutdownMode CKernel::Run (void)
 {
 	mLogger.Write (FromOric, LogNotice, "Phosphoric %s sur Circle", oric_machine_version ());
@@ -72,15 +157,30 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	const char *pKeyMap = mOptions.GetKeyMap ();
 	m_bAzerty = pKeyMap != 0 && strcmp (pKeyMap, "FR") == 0;
 
-	if (mScreen.GetWidth () != 240 || mScreen.GetHeight () != 224)
+	// Journal de Phosphoric dans oric/journal.txt (plus rien sur l'image)
+	FILE *pJournal = JournalOpen ("oric/journal.txt", "oric/journal-precedent.txt");
+	if (pJournal != 0)
 	{
-		mLogger.Write (FromOric, LogWarning,
-			       "Ecran %ux%u : mettre width=240 height=224 dans cmdline.txt",
-			       mScreen.GetWidth (), mScreen.GetHeight ());
+		oric_machine_log_to (pJournal);
+	}
+
+	if (m_bModem && !m_bNetStarting)
+	{
+		JournalPrintf ("Wi-Fi : demarrage impossible (firmware/, wpa_supplicant.conf ?)\n");
 	}
 
 	oric_media_t Media;
 	memset (&Media, 0, sizeof Media);
+	if (m_bModem)
+	{
+		// Modem Wi-Fi de LOCI, ACIA en $0380. Le picowifi de Phosphoric simule
+		// l'association au Wi-Fi dès qu'il a un nom de réseau ; la vraie
+		// liaison est celle de la Pi (wpa_supplicant.conf).
+		Media.serial = "picowifi:oric-rpi";
+		// Réglages du modem gardés par AT&W (numéros abrégés...) : dans la
+		// mémoire flash de LOCI, comme sur le vrai Pico W
+		setenv ("PHOSPHORIC_PICOWIFI_NVRAM", "oric/loci/picowifi.cfg", 1);
+	}
 	Media.loci = mOptions.GetAppOptionDecimal ("loci", 0) == 1;
 	Media.loci_flash_dir = mOptions.GetAppOptionString ("lociflash", "oric/loci");
 	Media.loci_usb_dir   = mOptions.GetAppOptionString ("lociusb", "oric/usb");
@@ -102,67 +202,158 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 
 	if (!oric_machine_init (&Media))
 	{
-		mLogger.Write (FromOric, LogPanic, "Initialisation de l'Oric impossible");
+		JournalFlush ();
+		mLogger.Write (FromOric, LogPanic, "Initialisation de l'Oric impossible (voir oric/journal.txt)");
 	}
-
-	oric_machine_quiet_log ();	// plus de journal Phosphoric par-dessus l'image
+	SetupDisplay ();
+	JournalFlush ();
 
 	s_nSamplesFrame = oric_machine_audio_rate () * FRAME_US / 1000000;	// 882
 
 	StartSound ();
 
+	DataMemBarrier ();
+	m_bMachineReady = true;			// le cœur 1 peut démarrer
+
+	unsigned nWritten = 0;			// trames dont le son est parti
 	unsigned nDeadline = CTimer::GetClockTicks ();
+	unsigned nWaitStart = nDeadline;
+	unsigned nLastFlush = nDeadline;
+
+	while (true)
+	{
+		mScheduler.Yield ();		// pile réseau, Wi-Fi
+		NetRelayService ();		// sockets et fermetures demandés par le cœur 1
+		UpdateNetwork ();
+		UpdateKeyboard ();
+		m_CPUThrottle.Update ();	// surveille la température (toutes les 2 à 5 s)
+
+		if (m_nFramesDone != m_nFramesRequested)
+		{
+			continue;		// le cœur 1 calcule la trame
+		}
+		DataMemBarrier ();
+
+		// Trame faite : le cœur 1 attend, on peut toucher au son et aux fichiers
+		if (nWritten != m_nFramesDone)
+		{
+			if (m_pSound != 0)
+			{
+				m_pSound->Write (s_SoundBuf, s_nSamplesFrame * 2 * sizeof (int16_t));
+			}
+			nWritten = m_nFramesDone;
+			nWaitStart = CTimer::GetClockTicks ();
+		}
+
+		if (m_bPerfRequest)
+		{
+			m_bPerfRequest = false;
+			JournalFlush ();
+			WritePerf ();
+		}
+		if (CTimer::GetClockTicks () - nLastFlush > 2000000)	// toutes les 2 s
+		{
+			JournalFlush ();
+			nLastFlush = CTimer::GetClockTicks ();
+		}
+
+		// Cadence 50 Hz : sur l'horloge du son si actif, sinon sur le timer
+		if (m_pSound != 0)
+		{
+			if (m_pSound->GetQueueFramesAvail () > 3 * s_nSamplesFrame)	// ~60 ms d'avance
+			{
+				if (CTimer::GetClockTicks () - nWaitStart > 10 * FRAME_US)
+				{
+					// le son ne se vide plus (pas de récepteur HDMI audio ?)
+					mLogger.Write (FromOric, LogWarning, "Son HDMI bloque, cadence sur le timer");
+					m_pSound->Cancel ();
+					m_pSound = 0;
+					nDeadline = CTimer::GetClockTicks ();
+				}
+				continue;
+			}
+		}
+		else
+		{
+			if ((int) (CTimer::GetClockTicks () - nDeadline) < 0)
+			{
+				continue;
+			}
+			nDeadline += FRAME_US;
+			if ((int) (CTimer::GetClockTicks () - nDeadline) > 5 * FRAME_US)
+			{
+				nDeadline = CTimer::GetClockTicks ();	// trop en retard : on recale
+			}
+		}
+
+		DataMemBarrier ();
+		m_nFramesRequested = m_nFramesDone + 1;		// trame suivante
+	}
+
+	return ShutdownHalt;
+}
+
+// Demandes du clavier, prises en compte entre deux trames (cœur 1)
+void CKernel::ApplyRequests (void)
+{
+	if (m_bResetRequest)
+	{
+		m_bResetRequest = false;
+		oric_machine_reset ();
+	}
+	if (m_bNMIRequest)
+	{
+		m_bNMIRequest = false;
+		oric_machine_nmi ();
+	}
+	if (m_bLociDown)
+	{
+		m_bLociDown = false;
+		oric_machine_loci_button (true);
+	}
+	if (m_bLociUp)
+	{
+		m_bLociUp = false;
+		oric_machine_loci_button (false);
+	}
+	if (m_bHIDChanged)
+	{
+		m_bHIDChanged = false;
+		unsigned char Keys[6];
+		for (unsigned i = 0; i < 6; i++)
+		{
+			Keys[i] = m_HIDKeys[i];
+		}
+		oric_machine_loci_kbd_report (m_ucHIDModifiers, Keys);
+	}
+}
+
+// Cœur 1 : une trame (image + son) à chaque demande du cœur 0.
+void CKernel::RunEmulation (void)
+{
+	while (!m_bMachineReady)
+	{
+		// attente de la préparation par le cœur 0
+	}
+	DataMemBarrier ();
+
 	unsigned nFrames = 0, nEmuSum = 0, nEmuMax = 0, nSkipped = 0;
 	bool bSkipBlit = false;
 
 	while (true)
 	{
-		UpdateKeyboard ();
+		while (m_nFramesRequested == m_nFramesDone)
+		{
+			// attente active de la demande suivante
+		}
+		DataMemBarrier ();
 
-		if (m_bResetRequest)
-		{
-			m_bResetRequest = false;
-			oric_machine_reset ();
-		}
-		if (m_bNMIRequest)
-		{
-			m_bNMIRequest = false;
-			oric_machine_nmi ();
-		}
-		if (m_bPerfRequest)
-		{
-			m_bPerfRequest = false;
-			WritePerf ();
-		}
-		if (m_bLociDown)
-		{
-			m_bLociDown = false;
-			oric_machine_loci_button (true);
-		}
-		if (m_bLociUp)
-		{
-			m_bLociUp = false;
-			oric_machine_loci_button (false);
-		}
-		if (m_bHIDChanged)
-		{
-			m_bHIDChanged = false;
-			unsigned char Keys[6];
-			for (unsigned i = 0; i < 6; i++)
-			{
-				Keys[i] = m_HIDKeys[i];
-			}
-			oric_machine_loci_kbd_report (m_ucHIDModifiers, Keys);
-		}
+		ApplyRequests ();
 
 		// Émulation d'une trame + son correspondant
 		unsigned nStart = CTimer::GetClockTicks ();
 		oric_machine_run_frame ();
-		if (m_pSound != 0)
-		{
-			oric_machine_audio (s_SoundBuf, s_nSamplesFrame);
-			m_pSound->Write (s_SoundBuf, s_nSamplesFrame * 2 * sizeof (int16_t));
-		}
+		oric_machine_audio (s_SoundBuf, s_nSamplesFrame);
 		unsigned nEmu = CTimer::GetClockTicks () - nStart;
 
 		// Affichage, sauté si la trame précédente a dépassé son budget
@@ -196,39 +387,9 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			nFrames = nEmuSum = nEmuMax = nSkipped = 0;
 		}
 
-		// Cadence 50 Hz : sur l'horloge du son si actif, sinon sur le timer
-		if (m_pSound != 0)
-		{
-			unsigned nWaitStart = CTimer::GetClockTicks ();
-			while (m_pSound->GetQueueFramesAvail () > 3 * s_nSamplesFrame)	// ~60 ms d'avance
-			{
-				// attente active : le son se vide à 44,1 kHz
-				if (CTimer::GetClockTicks () - nWaitStart > 10 * FRAME_US)
-				{
-					// le son ne se vide plus (pas de récepteur HDMI audio ?)
-					mLogger.Write (FromOric, LogWarning, "Son HDMI bloque, cadence sur le timer");
-					m_pSound->Cancel ();
-					m_pSound = 0;
-					nDeadline = CTimer::GetClockTicks ();
-					break;
-				}
-			}
-		}
-		else
-		{
-			nDeadline += FRAME_US;
-			if ((int) (CTimer::GetClockTicks () - nDeadline) > 5 * FRAME_US)
-			{
-				nDeadline = CTimer::GetClockTicks ();	// trop en retard : on recale
-			}
-			while ((int) (CTimer::GetClockTicks () - nDeadline) < 0)
-			{
-				// attente active jusqu'à l'échéance
-			}
-		}
+		DataMemBarrier ();
+		m_nFramesDone = m_nFramesDone + 1;
 	}
-
-	return ShutdownHalt;
 }
 
 // Repris de Circle sample/34-sounddevices (cas "sndhdmi") : le Pi Zero
@@ -399,17 +560,28 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
 }
 
 // ── Mesure de performance ─────────────────────────────────────────────────
-// Écrite sur demande (F12) dans oric/perf.txt, pour être lue sur un autre
-// ordinateur. L'écriture sur la carte SD peut provoquer un petit à-coup.
+// Ajoutée sur demande (F12) à la fin de oric/perf.txt, pour être lue sur un
+// autre ordinateur : chaque appui donne une mesure numérotée, avec le temps
+// écoulé depuis le démarrage. L'écriture sur la carte SD peut provoquer un
+// petit à-coup.
 void CKernel::WritePerf (void)
 {
-	FILE *pFile = fopen ("oric/perf.txt", "w");
+	FILE *pFile = fopen ("oric/perf.txt", "a");
 	if (pFile == 0)
 	{
 		return;
 	}
+
+	unsigned nUptime = CTimer::Get ()->GetUptime ();	// secondes
+	unsigned nARM = CMachineInfo::Get ()->GetClockRate (CLOCK_ID_ARM);
+
+	fprintf (pFile, "=== mesure %u, %u min %02u s apres le demarrage ===\n",
+		 ++m_nPerfCount, nUptime / 60, nUptime % 60);
 	fprintf (pFile, "Phosphoric %s sur Circle - temps d'emulation d'une trame\n",
 		 oric_machine_version ());
+	fprintf (pFile, "processeur ARM         : %u MHz (maximum %u MHz), %u C\n",
+		 nARM / 1000000, m_CPUThrottle.GetMaxClockRate () / 1000000,
+		 m_CPUThrottle.GetTemperature ());
 	fprintf (pFile, "budget par trame       : %u us (50 Hz)\n", FRAME_US);
 	if (m_nWindows == 0)
 	{
@@ -423,42 +595,164 @@ void CKernel::WritePerf (void)
 			 m_nWorst, m_nWindows);
 		fprintf (pFile, "charge moyenne        : %u %%\n", m_nLastAvg * 100 / FRAME_US);
 	}
-	fprintf (pFile, "son HDMI              : %s\n", m_pSound != 0 ? "actif" : "inactif");
+	fprintf (pFile, "son HDMI              : %s\n\n", m_pSound != 0 ? "actif" : "inactif");
 	fclose (pFile);
 }
 
 // ── Affichage ────────────────────────────────────────────────────────────
-// Copie le framebuffer RGB888 de Phosphoric (240x224) dans le framebuffer
-// 16 bits de Circle ; l'agrandissement à la taille de l'écran est fait par
-// le GPU (width=240 height=224 dans cmdline.txt).
+// L'image RGB888 de Phosphoric (240x224) est copiée dans le framebuffer
+// 16 bits de Circle (taille : width= height= de cmdline.txt), puis le GPU
+// l'agrandit à l'écran en gardant les proportions (avec un léger flou).
+//   pixels=tele   : points 1,23 fois plus larges que hauts, comme sur un
+//                   téléviseur PAL (point de l'Oric à 6 MHz, points carrés
+//                   à 14,75 MHz : 14,75 / 6 / 2 trames) ; width=590 height=448
+//   pixels=carres : points carrés (comme Oricutron) ; width=240 height=224
+//   couleurs=tele : les 6 couleurs comme sur le téléviseur de Pierre (réglage
+//                   de cpa-oric, docs/console-distance.md § 9) ; =pures : 00/FF
+// En hauteur, chaque ligne est répétée un nombre entier de fois ; en largeur,
+// chaque point de l'écran prend la part des points de l'Oric qu'il couvre :
+// au plus un point adouci par bord, comme la page web de cpa-oric.
+
+#define TELE_RATIO_X100	123
+#define MAX_SRC_WIDTH	512
+#define MAX_OUT_WIDTH	4096
+
+// Couleurs Tele de cpa-oric (tools/remote.html), dans l'ordre de l'Oric
+// (bit 0 rouge, bit 1 vert, bit 2 bleu)
+static const u8 s_TeleRGB[8][3] =
+{
+	{0x00, 0x00, 0x00}, {0xFF, 0x2A, 0x1A}, {0x2E, 0xC2, 0x2E}, {0xFD, 0xDE, 0x53},
+	{0x0A, 0x3C, 0xFF}, {0xEE, 0x22, 0xEE}, {0x18, 0xE8, 0xE8}, {0xFF, 0xFF, 0xFF}
+};
+
+static u16 s_SrcCol[MAX_OUT_WIDTH];	// point de l'Oric à gauche de chaque point de l'écran
+static u16 s_Weight[MAX_OUT_WIDTH];	// sa part, sur 256 (le reste au point suivant)
+
+// Calcule l'agrandissement une fois pour toutes (cœur 0, avant l'émulation).
+void CKernel::SetupDisplay (void)
+{
+	const char *pPixels = mOptions.GetAppOptionString ("pixels", "tele");
+	const char *pColors = mOptions.GetAppOptionString ("couleurs", "tele");
+	bool bTelePixels = strcmp (pPixels, "carres") != 0;
+	m_bTeleColors = strcmp (pColors, "pures") != 0;
+
+	int nSrcWidth, nSrcHeight;
+	oric_machine_framebuffer (&nSrcWidth, &nSrcHeight);
+
+	CBcmFrameBuffer *pFrameBuffer = mScreen.GetFrameBuffer ();
+	unsigned nFBWidth  = pFrameBuffer->GetWidth ();
+	unsigned nFBHeight = pFrameBuffer->GetHeight ();
+
+	m_nScaleY = nFBHeight / nSrcHeight;
+	if (m_nScaleY == 0)
+	{
+		m_nScaleY = 1;			// écran trop petit : image coupée en bas
+	}
+	m_nOutHeight = nSrcHeight * m_nScaleY;
+	if (m_nOutHeight > nFBHeight)
+	{
+		m_nOutHeight = nFBHeight;
+	}
+
+	unsigned nWanted = nSrcWidth * m_nScaleY * (bTelePixels ? TELE_RATIO_X100 : 100) / 100;
+	m_nOutWidth = nWanted;
+	if (m_nOutWidth > nFBWidth)
+	{
+		m_nOutWidth = nFBWidth;
+	}
+	if (m_nOutWidth > MAX_OUT_WIDTH)
+	{
+		m_nOutWidth = MAX_OUT_WIDTH;
+	}
+	m_nOffsetX = (nFBWidth  - m_nOutWidth) / 2;
+	m_nOffsetY = (nFBHeight - m_nOutHeight) / 2;
+
+	// Point j de l'écran = intervalle [j, j+1[ * nSrcWidth / m_nOutWidth de la ligne de l'Oric
+	for (unsigned j = 0; j < m_nOutWidth; j++)
+	{
+		u64 nStart = (u64) j * nSrcWidth * 65536 / m_nOutWidth;
+		u64 nEnd   = (u64) (j + 1) * nSrcWidth * 65536 / m_nOutWidth;
+		unsigned nCol = nStart >> 16;
+		u64 nBoundary = (u64) (nCol + 1) << 16;
+		s_SrcCol[j] = nCol;
+		s_Weight[j] = (nEnd <= nBoundary || nCol + 1 >= (unsigned) nSrcWidth)
+			      ? 256 : (unsigned) ((nBoundary - nStart) * 256 / (nEnd - nStart));
+	}
+
+	// Cadre noir autour de l'image
+	u16 *pDest = (u16 *) (uintptr) pFrameBuffer->GetBuffer ();
+	unsigned nPitch = pFrameBuffer->GetPitch () / sizeof (u16);
+	for (unsigned y = 0; y < nFBHeight; y++)
+	{
+		memset (pDest + y * nPitch, 0, nFBWidth * sizeof (u16));
+	}
+
+	JournalPrintf ("Affichage : framebuffer %ux%u, image %ux%u, pixels=%s, couleurs=%s\n",
+		       nFBWidth, nFBHeight, m_nOutWidth, m_nOutHeight,
+		       bTelePixels ? "tele" : "carres", m_bTeleColors ? "tele" : "pures");
+	if (m_nOutWidth < nWanted || m_nOutHeight < (unsigned) nSrcHeight)
+	{
+		JournalPrintf ("Affichage : framebuffer trop petit, mettre %s dans cmdline.txt\n",
+			       bTelePixels ? "width=590 height=448" : "width=240 height=224");
+	}
+}
+
 void CKernel::Blit (void)
 {
 	CBcmFrameBuffer *pFrameBuffer = mScreen.GetFrameBuffer ();
-	u16 *pDest = (u16 *) (uintptr) pFrameBuffer->GetBuffer ();
 	unsigned nPitch = pFrameBuffer->GetPitch () / sizeof (u16);
+	u16 *pDest = (u16 *) (uintptr) pFrameBuffer->GetBuffer () + m_nOffsetY * nPitch + m_nOffsetX;
 
 	int nSrcWidth, nSrcHeight;
 	const u8 *pSrc = oric_machine_framebuffer (&nSrcWidth, &nSrcHeight);
-
-	unsigned nWidth  = nSrcWidth;
-	unsigned nHeight = nSrcHeight;
-	if (nWidth > pFrameBuffer->GetWidth ())
+	if (nSrcWidth > MAX_SRC_WIDTH)
 	{
-		nWidth = pFrameBuffer->GetWidth ();
-	}
-	if (nHeight > pFrameBuffer->GetHeight ())
-	{
-		nHeight = pFrameBuffer->GetHeight ();
+		return;
 	}
 
-	for (unsigned y = 0; y < nHeight; y++)
+	static u8 Line[MAX_SRC_WIDTH][3];	// ligne de l'Oric, couleurs Tele appliquées
+
+	for (unsigned y = 0; y < m_nOutHeight / m_nScaleY; y++)
 	{
-		const u8 *pLine = pSrc + y * nSrcWidth * 3;
-		u16 *pOut = pDest + y * nPitch;
-		for (unsigned x = 0; x < nWidth; x++)
+		const u8 *pIn = pSrc + y * nSrcWidth * 3;
+		for (int x = 0; x < nSrcWidth; x++, pIn += 3)
 		{
-			pOut[x] = COLOR16 (pLine[0] >> 3, pLine[1] >> 3, pLine[2] >> 3);
-			pLine += 3;
+			const u8 *pRGB = pIn;
+			if (m_bTeleColors)
+			{
+				unsigned r = pIn[0], g = pIn[1], b = pIn[2];
+				if (   (r == 0 || r == 0xFF) && (g == 0 || g == 0xFF)
+				    && (b == 0 || b == 0xFF))
+				{
+					pRGB = s_TeleRGB[(r & 1) | (g & 2) | (b & 4)];
+				}
+			}
+			Line[x][0] = pRGB[0];
+			Line[x][1] = pRGB[1];
+			Line[x][2] = pRGB[2];
+		}
+
+		u16 *pOut = pDest + y * m_nScaleY * nPitch;
+		for (unsigned j = 0; j < m_nOutWidth; j++)
+		{
+			const u8 *p0 = Line[s_SrcCol[j]];
+			unsigned w = s_Weight[j];
+			if (w == 256)
+			{
+				pOut[j] = COLOR16 (p0[0] >> 3, p0[1] >> 3, p0[2] >> 3);
+			}
+			else
+			{
+				const u8 *p1 = p0 + 3;
+				unsigned r = (p0[0] * w + p1[0] * (256 - w)) >> 8;
+				unsigned g = (p0[1] * w + p1[1] * (256 - w)) >> 8;
+				unsigned b = (p0[2] * w + p1[2] * (256 - w)) >> 8;
+				pOut[j] = COLOR16 (r >> 3, g >> 3, b >> 3);
+			}
+		}
+		for (unsigned k = 1; k < m_nScaleY; k++)
+		{
+			memcpy (pOut + k * nPitch, pOut, m_nOutWidth * sizeof (u16));
 		}
 	}
 }

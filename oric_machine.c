@@ -350,9 +350,23 @@ bool oric_machine_init(const oric_media_t* media) {
         cfg.loci_usb_count = 1;
     }
 
+    /* --serial ARG : option de la carte ACIA (src/cards/card_acia.c), passée
+     * par la table getopt des cartes comme le fait main.c. Avec --loci et
+     * sans --acia-addr, l'ACIA se place en $0380 (modem de LOCI). */
+    if (media->serial) {
+        static const struct option no_core_options[] = { { 0, 0, 0, 0 } };
+        const struct option* opts = card_modules_long_options(no_core_options);
+        for (int i = 0; opts[i].name; i++)
+            if (strcmp(opts[i].name, "serial") == 0)
+                card_modules_set_option(cfg.card_cfg, opts[i].val, media->serial);
+    }
+
     /* main_setup_machine */
     if (!emulator_init(emu)) return false;
     if (card_modules_setup(emu, &cfg, CARD_STAGE_MACHINE) != 0) return false;
+
+    /* main_setup_serial_cards (ACIA 6551 et son modem) */
+    if (card_modules_setup(emu, &cfg, CARD_STAGE_SERIAL) != 0) return false;
 
     /* main_setup_loci */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_LOCI) != 0) return false;
@@ -403,6 +417,15 @@ void oric_machine_loci_button(bool down) {
         loci_action_button_short(&emu->loci);
     } else {
         emu->loci_button_long = false;     /* [port] appui long (ROM de diagnostic) non repris */
+        /* [port] Contournement (docs/phosphoric-f8.md) : si un programme a
+         * remplacé la ROM par la RAM ($C000-$FFFF, ROMDIS du Microdisc,
+         * cas de CP/A), le menu chargé dans la ROM resterait caché et le
+         * 6502 redémarrerait dans cette RAM. La vraie cartouche reprend la
+         * main sur le bus : on rend la ROM visible avant le relâchement. */
+        if (emu->loci.action_active && !emu->loci_menu_active) {
+            emu->memory.basic_rom_disabled = false;
+            emu->memory.overlay_active = false;
+        }
         loci_action_button_release(&emu->loci);
     }
 }
@@ -475,8 +498,9 @@ void oric_machine_audio(int16_t* stereo, int n) {
     ay_generate(&s_emu.psg, stereo, n);
 }
 
-void oric_machine_quiet_log(void) {
-    log_init(LOG_LEVEL_WARNING);
+void oric_machine_log_to(FILE* fp) {
+    log_set_stream(fp);
+    log_init(LOG_LEVEL_INFO);
 }
 
 const char* oric_machine_version(void) {

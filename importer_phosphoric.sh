@@ -1,7 +1,7 @@
 #!/bin/sh
 # importer_phosphoric.sh — Recopie dans le dépôt du port les SEULS fichiers de
 # Phosphoric nécessaires (Oric-1/Atmos complet avec LOCI en émulation de haut
-# niveau ; sans ACIA/modem, sans réseau, sans SDL), SANS LES MODIFIER.
+# niveau, ACIA 6551 et modem Wi-Fi picowifi ; sans SDL), SANS LES MODIFIER.
 #
 # Usage : sh importer_phosphoric.sh [dossier_phosphoric] [dossier_du_port]
 #   défauts : /home/pi/Projets/phosphoric  et  le dossier de ce script
@@ -24,16 +24,19 @@ DEST="$PORT/phosphoric"
 
 PHOSPHORIC_SOURCES="
   src/audio/ay3891x.c
+  src/cards/card_acia.c
   src/cards/card_jasmin.c
   src/cards/card_loci.c
   src/cards/card_microdisc.c
   src/cards/card_modules.c
   src/cards/card_ula_ng.c
+  src/cli/cli_parse.c
   src/cpu/addressing.c
   src/cpu/cpu6502.c
   src/cpu/microseq.c
   src/cpu/opcodes.c
   src/emu_clock.c
+  src/io/acia6551.c
   src/io/cassette.c
   src/io/io_bus.c
   src/io/jasmin.c
@@ -50,6 +53,9 @@ PHOSPHORIC_SOURCES="
   src/io/mcp40.c
   src/io/microdisc.c
   src/io/printer.c
+  src/io/serial_backend.c
+  src/io/serial_picowifi.c
+  src/io/smf.c
   src/io/tape_patches.c
   src/io/ula_ng.c
   src/io/via6522.c
@@ -61,6 +67,7 @@ PHOSPHORIC_SOURCES="
   src/storage/sedoric.c
   src/storage/tap.c
   src/utils/logging.c
+  src/utils/netutil.c
   src/video/hires.c
   src/video/textmode.c
   src/video/video.c
@@ -73,6 +80,7 @@ PHOSPHORIC_HEADERS="
   include/cards.h
   include/cards_list.h
   include/cli/cli_opts.h
+  include/cli/cli_parse.h
   include/cpu/cpu6502.h
   include/cpu/cpu_internal.h
   include/cpu/microseq.h
@@ -96,6 +104,7 @@ PHOSPHORIC_HEADERS="
   include/io/microdisc.h
   include/io/printer.h
   include/io/serial_backend.h
+  include/io/smf.h
   include/io/tape_patches.h
   include/io/ula_ng.h
   include/io/via6522.h
@@ -111,6 +120,7 @@ PHOSPHORIC_HEADERS="
   include/utils/binio.h
   include/utils/logging.h
   include/utils/movie.h
+  include/utils/netutil.h
   include/utils/oscompat.h
   include/utils/profiler.h
   include/utils/symbols.h

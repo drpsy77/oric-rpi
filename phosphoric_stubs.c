@@ -11,7 +11,8 @@
  *
  * Signatures recopiées des en-têtes de Phosphoric (voir SOURCES.md).
  *
- * LOCI (émulation de haut niveau) est repris : plus de stub pour lui.
+ * LOCI (émulation de haut niveau) et l'ACIA 6551 (modem picowifi) sont
+ * repris : plus de stub pour eux.
  *
  * Pour réintégrer un composant plus tard : copier son .c depuis Phosphoric
  * et supprimer le stub correspondant ci-dessous.
@@ -23,14 +24,12 @@
 
 /* Cartes absentes — src/cards/card_<id>.c non repris.
  * Module vide = sans menu, sans option, sans bus, sans setup (testé NULL). */
-const card_module_t card_acia    = {0};   /* ACIA 6551 / modem   */
 const card_module_t card_dtl2000 = {0};   /* Digitelec DTL 2000  */
 const card_module_t card_mageco  = {0};   /* Mageco MIDI         */
 const card_module_t card_sp0256  = {0};   /* synthèse vocale     */
 const card_module_t card_mea8000 = {0};   /* synthèse vocale     */
 
 /* Ticks des cartes (include/card_ticks.h), appelés seulement si card_on. */
-void card_acia_tick(emulator_t* e, int c)    { (void)e; (void)c; }
 void card_dtl2000_tick(emulator_t* e, int c) { (void)e; (void)c; }
 void card_mageco_tick(emulator_t* e, int c)  { (void)e; (void)c; }
 void card_sp0256_tick(emulator_t* e, int c)  { (void)e; (void)c; }

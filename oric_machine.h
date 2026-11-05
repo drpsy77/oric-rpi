@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,7 @@ typedef struct {
     bool        loci;            /* cartouche LOCI (émulation de haut niveau) */
     const char* loci_flash_dir;  /* dossier = mémoire flash interne « 0: » */
     const char* loci_usb_dir;    /* dossier = clé USB « 1: » (NULL : aucune) */
+    const char* serial;          /* --serial (ex. "picowifi" : modem Wi-Fi) ; NULL : aucun */
 } oric_media_t;
 
 /* Initialise la machine, charge les supports, fait le reset CPU.
@@ -59,8 +61,9 @@ void oric_machine_keyboard_release_all(void);
 int  oric_machine_audio_rate(void);              /* Hz (44 100) */
 void oric_machine_audio(int16_t* stereo, int n);
 
-/* Ne garder que les avertissements et erreurs dans le journal Phosphoric. */
-void oric_machine_quiet_log(void);
+/* Envoie le journal de Phosphoric (niveau info et au-dessus) dans fp
+ * au lieu de l'écran. À appeler avant oric_machine_init. */
+void oric_machine_log_to(FILE* fp);
 
 /* Version de Phosphoric. */
 const char* oric_machine_version(void);

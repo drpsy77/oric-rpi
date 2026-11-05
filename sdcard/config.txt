@@ -1,4 +1,8 @@
-# config.txt — Pi Zero / Zero W, kernel.img (Circle, 32 bits)
-# Aucun réglage n'est indispensable. Décommenter si l'écran est vu comme DVI
-# (pas de son HDMI) : force le mode HDMI, donc le son.
+# config.txt — Pi 3B+ / Zero 2 W, kernel8-32.img (Circle, 32 bits, multicœur)
+arm_64bit=0
+kernel=kernel8-32.img
+# Décommenter si l'écran est vu comme DVI (pas de son HDMI) : force le mode
+# HDMI, donc le son.
 #hdmi_drive=2
+# Points nets au lieu du léger flou de l'agrandissement (à essayer).
+#scaling_kernel=8
