@@ -31,6 +31,8 @@ typedef struct {
     bool        loci;            /* cartouche LOCI (émulation de haut niveau) */
     const char* loci_flash_dir;  /* dossier = mémoire flash interne « 0: » */
     const char* loci_usb_dir;    /* dossier = clé USB « 1: » (NULL : aucune) */
+    const char* loci_disk;       /* image vue par LOCI (ex. "0:/cpa.dsk") : montée
+                                    en A:, démarrage direct dessus (NULL : menu) */
     const char* serial;          /* --serial (ex. "picowifi" : modem Wi-Fi) ; NULL : aucun */
     bool        serial_cadence;  /* ACIA cadencée sur son registre de contrôle
                                     (9600 bauds...) ; false : sans cadence,
@@ -43,6 +45,10 @@ bool oric_machine_init(const oric_media_t* media);
 
 /* Exécute une trame PAL complète (19 968 cycles = 20 ms d'Oric). */
 void oric_machine_run_frame(void);
+
+/* Réécrit sur la carte SD les disquettes modifiées, sans attendre (avant un
+ * redémarrage ; émulation arrêtée). */
+void oric_machine_flush_disks(void);
 
 /* Reset (F5 de Phosphoric) et NMI (bouton sous l'Oric, Maj+F5). */
 void oric_machine_reset(void);

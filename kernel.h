@@ -47,6 +47,11 @@ private:
 	void Blit (void);
 	void WritePerf (void);
 
+	// Réglages : oric.cfg (dossier de lociflash=) d'abord, puis cmdline.txt
+	void ReadSettings (void);
+	const char *Option (const char *pName, const char *pDefault = 0);
+	unsigned OptionDecimal (const char *pName, unsigned nDefault);
+
 	// Repris de Circle sample/08-usbkeyboard (mode brut)
 	static void KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6]);
 	static void KeyboardRemovedHandler (CDevice *pDevice, void *pContext);
@@ -76,6 +81,7 @@ private:
 	volatile bool m_bResetRequest;
 	volatile bool m_bNMIRequest;
 	volatile bool m_bPerfRequest;			// celle-ci par le cœur 0
+	volatile bool m_bRebootRequest;			// Ctrl+Alt+Suppr, cœur 0 aussi
 
 	// LOCI : bouton Action (F8) et rapport clavier HID
 	volatile bool m_bLociDown;

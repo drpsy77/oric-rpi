@@ -20,7 +20,7 @@ include $(CIRCLESTDLIB)/Config.mk
 PHOSPHORIC_SRC = $(sort $(wildcard phosphoric/src/*.c phosphoric/src/*/*.c))
 PHOSPHORIC_OBJS = $(PHOSPHORIC_SRC:.c=.o)
 
-OBJS	= main.o kernel.o oric_machine.o phosphoric_stubs.o newlib_compat.o journal.o netrelay.o disquette.o $(PHOSPHORIC_OBJS)
+OBJS	= main.o kernel.o oric_machine.o phosphoric_stubs.o newlib_compat.o journal.o netrelay.o disquette.o locidisk.o $(PHOSPHORIC_OBJS)
 
 # Phosphoric utilise <stdatomic.h> (C11) ; Circle compile en gnu99 par défaut.
 # circle-stdlib place les en-têtes C++ avant ceux de GCC : avec GCC >= 13, un

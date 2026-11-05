@@ -80,7 +80,18 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   `oric/loci/` = flash « 0: » (`locirom`, `basic11b.rom`, `microdis.rom`),
   `oric/usb/` = clé « 1: » (`.dsk`, `.tap`) ; le menu ne voit rien d'autre ;
 - `modem=1` : modem Wi-Fi de LOCI ; ACIA sans cadence (`modemcadence=1`
-  pour la cadence de Phosphoric, 9600 bauds).
+  pour la cadence de Phosphoric, 9600 bauds). Avec le modem, il est « 1: » et
+  la clé devient « 2: » (sans lui, la clé est « 1: ») : « 0: » est le seul
+  repère fixe.
+- `locidisk=0:/cpa.dsk` (avec `loci=1`) : image en A: de LOCI, démarrage
+  direct sans le menu ; F8 montre le menu avec A: rempli. Essayé sur le banc
+  natif (CP/A démarre, `USBMOUNT` voit A:, `USBMOUNT C: x.DSK` depuis la clé
+  marche). `USBMOUNT` refuse les images de 0: (le vrai LOCI s'y est figé) :
+  les disquettes en plus vont sur la clé.
+- `oric/loci/oric.cfg` (`0:ORIC.CFG` pour l'Oric) : mêmes réglages que
+  `cmdline.txt` (sauf `width`, `height`, `lociflash`), qui y sont remplacés ;
+  `nom=valeur`, `#` commentaire ; noté dans le journal. Modèle `sdcard/`.
+- Ctrl+Alt+Suppr : disquettes réécrites, journal, puis redémarrage.
 
 Fichiers écrits par le noyau : `oric/journal.txt` (journal de Phosphoric,
 session précédente dans `journal-precedent.txt`), `oric/perf.txt` (F12, une
@@ -94,6 +105,7 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
 | `kernel.cpp/.h` | cœur 0 : clavier USB, son HDMI, Wi-Fi, température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) |
 | `oric_machine.c/.h` | colle extraite de `main.c` de Phosphoric, API C opaque |
 | `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture), cœur 1 entre deux trames |
+| `locidisk.c/.h` | `locidisk=0:/x.dsk` : A: de LOCI monté, XRAM du menu, démarrage direct (comme le menu puis Échap) |
 | `journal.cpp/.h` | journal en mémoire (verrou entre cœurs), écrit par le cœur 0 |
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |

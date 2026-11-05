@@ -1,4 +1,4 @@
-# Signalement pour Phosphoric : bouton Action de LOCI (F8), reprise de session, ACIA de LOCI (pertes, cadence), disquettes jamais réécrites
+# Signalement pour Phosphoric : bouton Action de LOCI (F8), reprise de session, ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage
 
 À envoyer à bmarty (Phosphoric 2.30.0, commit 675cb06). Observé sur le port
 Circle (Pi 3B+), analysé dans le code ; **pas encore reproduit** avec
@@ -130,3 +130,11 @@ Contournement dans le port (`disquette.c`) : 2 s après la dernière écriture
 (`disk_modified` du contrôleur de LOCI, `disk_dirty` du Microdisc), les
 pistes qui diffèrent du fichier sont réinjectées (copie de
 `mfm_inject_track`) et réécrites sur place.
+
+## Sixième point : pas de montage d'une disquette de LOCI au démarrage
+
+Pour démarrer sur une disquette avec LOCI, il faut passer par le menu à
+chaque fois (choisir l'image, puis Échap). Une option du genre
+`--loci-mount A:0:/cpa.dsk` (montage, configuration du menu en XRAM, puis
+`MIA_BOOT` avec `LOCI_BOOT_FDC`) éviterait le menu. Le port le fait dans
+`locidisk.c` avec `resolve_path`, `loci_dsk_open` et `loci_rom_swap_cb`.

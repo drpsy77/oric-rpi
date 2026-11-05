@@ -92,9 +92,18 @@ L'adresse obtenue est notée dans `oric/journal.txt`. L'ACIA du modem n'est
 pas cadencée (comme sur le vrai LOCI) ; `modemcadence=1` rend la cadence de
 Phosphoric (9600 bauds).
 
+Démarrage direct sur une disquette, sans le menu : `locidisk=0:/cpa.dsk`
+(avec `loci=1`), l'image étant dans `oric/loci/`. Elle est en A: de LOCI ; F8
+montre le menu avec A: rempli, `USBMOUNT` monte les autres depuis la clé.
+
+Réglages modifiables depuis l'Oric : `oric/loci/oric.cfg` (`0:ORIC.CFG` pour
+LOCI), mêmes noms que dans `cmdline.txt`, qu'ils remplacent (sauf `width`,
+`height`, `lociflash`). Modèle dans `sdcard/`.
+
 Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action du LOCI (retour au
 menu), F12 = ajoute une mesure de performance à
-`oric/perf.txt`.
+`oric/perf.txt`, Ctrl+Alt+Suppr = disquettes réécrites, puis redémarrage de
+la Pi.
 
 ## Merci
 

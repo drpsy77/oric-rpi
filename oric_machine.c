@@ -28,6 +28,7 @@
 #include "rom_patches.h"
 #include "utils/logging.h"
 #include "disquette.h"
+#include "locidisk.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -444,10 +445,23 @@ bool oric_machine_init(const oric_media_t* media) {
     if (card_modules_setup(emu, &cfg, CARD_STAGE_DISKS_EARLY) != 0) return false;
     if (card_modules_setup(emu, &cfg, CARD_STAGE_DISKS) != 0) return false;
 
+    /* [port] Démarrage direct sur une disquette de LOCI (locidisk.c), au
+     * lieu du menu ; en cas d'échec, le menu reste la ROM système. */
+    if (emu->card_on[CARD_IDX_loci] && media->loci_disk &&
+        !locidisk_boot(emu, media->loci_disk, media->serial != NULL)) {
+        if (!memory_load_rom(&emu->memory, media->rom_file, 0)) return false;
+        loci_patch_rom_info(emu);
+    }
+
     /* emulator_run : power-on reset */
     cpu_reset(&emu->cpu);
     log_info("Starting emulation at PC=$%04X", emu->cpu.PC);
     return true;
+}
+
+/* [port] Ctrl+Alt+Suppr : disquettes réécrites avant le redémarrage */
+void oric_machine_flush_disks(void) {
+    disquette_flush(&s_emu);
 }
 
 /* main.c sdl_function_key : F5 = cpu_reset, Maj+F5 = cpu_nmi */

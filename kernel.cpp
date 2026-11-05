@@ -29,10 +29,15 @@
 //                                 wpa_supplicant.conf à la racine de la carte
 //   modemcadence=1                ACIA du modem cadencée sur son débit (9600
 //                                 bauds) ; défaut 0 : sans cadence, comme LOCI
+//   locidisk=0:/cpa.dsk           avec loci=1 : image montée en A: de LOCI et
+//                                 démarrage direct dessus (sans le menu)
+// Ces réglages (sauf width, height, lociflash) peuvent aussi être mis dans
+// oric.cfg du dossier lociflash (0:ORIC.CFG pour l'Oric), qui l'emporte.
 // Journal de Phosphoric : oric/journal.txt (session précédente :
 // oric/journal-precedent.txt). Émulation sur le cœur 1, le reste sur le cœur 0.
 // Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action de LOCI (comme
-//           Phosphoric), F12 = ajoute une mesure de performance à oric/perf.txt.
+//           Phosphoric), F12 = ajoute une mesure de performance à oric/perf.txt,
+//           Ctrl+Alt+Suppr = disquettes réécrites, puis redémarrage de la Pi.
 //
 #include "kernel.h"
 #include "oric_machine.h"
@@ -94,6 +99,7 @@ CKernel::CKernel (void)
 	m_bResetRequest (false),
 	m_bNMIRequest (false),
 	m_bPerfRequest (false),
+	m_bRebootRequest (false),
 	m_bLociDown (false),
 	m_bLociUp (false),
 	m_bHIDChanged (false),
@@ -121,7 +127,9 @@ bool CKernel::Initialize (void)
 		return false;
 	}
 
-	m_bModem = mOptions.GetAppOptionDecimal ("modem", 0) == 1;
+	ReadSettings ();		// carte SD montée : oric.cfg
+
+	m_bModem = OptionDecimal ("modem", 0) == 1;
 	if (m_bModem)
 	{
 		m_bNetStarting =    mWLAN.Initialize ()
@@ -135,6 +143,92 @@ bool CKernel::Initialize (void)
 	}
 
 	return m_EmuCores.Initialize ();
+}
+
+// Réglages de oric.cfg, dans la mémoire flash de LOCI (lociflash=, vue par
+// l'Oric comme 0:ORIC.CFG) : modifiable depuis CP/A, alors que cmdline.txt,
+// à la racine de la carte, est hors de portée de LOCI. Mêmes noms que dans
+// cmdline.txt, « nom=valeur » séparés par des espaces ou des fins de ligne,
+// « # » jusqu'à la fin de la ligne = commentaire. Ils remplacent ceux de
+// cmdline.txt, sauf width, height et lociflash (lus avant).
+#define MAX_SETTINGS	32
+static char s_SettingsText[4096];
+static const char *s_pSettingName[MAX_SETTINGS];
+static const char *s_pSettingValue[MAX_SETTINGS];
+static unsigned s_nSettings;
+static bool s_bSettingsFile;
+
+void CKernel::ReadSettings (void)
+{
+	char Path[128];
+	snprintf (Path, sizeof Path, "%s/oric.cfg",
+		  mOptions.GetAppOptionString ("lociflash", "oric/loci"));
+	FILE *pFile = fopen (Path, "r");
+	if (pFile == 0)
+	{
+		return;
+	}
+	size_t nLength = fread (s_SettingsText, 1, sizeof s_SettingsText - 1, pFile);
+	fclose (pFile);
+	s_SettingsText[nLength] = '\0';
+	s_bSettingsFile = true;
+
+	char *pLine = s_SettingsText;
+	while (pLine != 0)
+	{
+		char *pNext = strchr (pLine, '\n');
+		if (pNext != 0)
+		{
+			*pNext++ = '\0';
+		}
+		char *pComment = strchr (pLine, '#');
+		if (pComment != 0)
+		{
+			*pComment = '\0';
+		}
+
+		char *pSave;
+		for (char *pWord = strtok_r (pLine, " \t\r", &pSave); pWord != 0;
+		     pWord = strtok_r (0, " \t\r", &pSave))
+		{
+			char *pEqual = strchr (pWord, '=');
+			if (pEqual != 0 && pEqual != pWord && s_nSettings < MAX_SETTINGS)
+			{
+				*pEqual = '\0';			// mot sans « = » : ignoré
+				s_pSettingName[s_nSettings] = pWord;
+				s_pSettingValue[s_nSettings] = pEqual + 1;
+				s_nSettings++;
+			}
+		}
+
+		pLine = pNext;
+	}
+}
+
+const char *CKernel::Option (const char *pName, const char *pDefault)
+{
+	for (unsigned i = 0; i < s_nSettings; i++)
+	{
+		if (strcmp (s_pSettingName[i], pName) == 0)
+		{
+			return s_pSettingValue[i];
+		}
+	}
+	return mOptions.GetAppOptionString (pName, pDefault);
+}
+
+unsigned CKernel::OptionDecimal (const char *pName, unsigned nDefault)
+{
+	for (unsigned i = 0; i < s_nSettings; i++)
+	{
+		if (strcmp (s_pSettingName[i], pName) == 0)
+		{
+			char *pEnd;
+			unsigned long nValue = strtoul (s_pSettingValue[i], &pEnd, 10);
+			return *pEnd == '\0' && pEnd != s_pSettingValue[i] ? nValue : nDefault;
+		}
+	}
+	return mOptions.GetAppOptionDecimal (pName, nDefault);
 }
 
 // Cœur 0 : le réseau est prêt dès que le Wi-Fi a une adresse (DHCP).
@@ -159,7 +253,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 {
 	mLogger.Write (FromOric, LogNotice, "Phosphoric %s sur Circle", oric_machine_version ());
 
-	const char *pKeyMap = mOptions.GetKeyMap ();
+	const char *pKeyMap = Option ("keymap", mOptions.GetKeyMap ());
 	m_bAzerty = pKeyMap != 0 && strcmp (pKeyMap, "FR") == 0;
 
 	// Journal de Phosphoric dans oric/journal.txt (plus rien sur l'image)
@@ -167,6 +261,15 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	if (pJournal != 0)
 	{
 		oric_machine_log_to (pJournal);
+	}
+
+	if (s_bSettingsFile)
+	{
+		JournalPrintf ("oric.cfg : %u reglage(s)\n", s_nSettings);
+		for (unsigned i = 0; i < s_nSettings; i++)
+		{
+			JournalPrintf ("  %s=%s\n", s_pSettingName[i], s_pSettingValue[i]);
+		}
 	}
 
 	if (m_bModem && !m_bNetStarting)
@@ -186,21 +289,22 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// mémoire flash de LOCI, comme sur le vrai Pico W
 		setenv ("PHOSPHORIC_PICOWIFI_NVRAM", "oric/loci/picowifi.cfg", 1);
 		// ACIA sans cadence (comme le vrai LOCI), sauf modemcadence=1
-		Media.serial_cadence = mOptions.GetAppOptionDecimal ("modemcadence", 0) == 1;
+		Media.serial_cadence = OptionDecimal ("modemcadence", 0) == 1;
 	}
-	Media.loci = mOptions.GetAppOptionDecimal ("loci", 0) == 1;
+	Media.loci = OptionDecimal ("loci", 0) == 1;
 	Media.loci_flash_dir = mOptions.GetAppOptionString ("lociflash", "oric/loci");
-	Media.loci_usb_dir   = mOptions.GetAppOptionString ("lociusb", "oric/usb");
+	Media.loci_usb_dir   = Option ("lociusb", "oric/usb");
+	Media.loci_disk      = Option ("locidisk");	// ex. 0:/cpa.dsk : démarrage direct
 
 	// ROM système : rom= ; à défaut, le menu LOCI (si LOCI) ou le BASIC 1.1
 	static char LociMenuROM[128];
 	snprintf (LociMenuROM, sizeof LociMenuROM, "%s/locirom", Media.loci_flash_dir);
-	Media.rom_file = mOptions.GetAppOptionString ("rom",
+	Media.rom_file = Option ("rom",
 				Media.loci ? LociMenuROM : "oric/basic11b.rom");
-	Media.tape_file     = mOptions.GetAppOptionString ("tape");
-	Media.fdc_timing    = mOptions.GetAppOptionString ("fdctiming");	// fast | real
-	const char *pDisk    = mOptions.GetAppOptionString ("disk");
-	const char *pDiskROM = mOptions.GetAppOptionString ("diskrom");
+	Media.tape_file     = Option ("tape");
+	Media.fdc_timing    = Option ("fdctiming");	// fast | real
+	const char *pDisk    = Option ("disk");
+	const char *pDiskROM = Option ("diskrom");
 	if (pDisk != 0 && pDiskROM != 0)	// Microdisc seulement avec ROM + disquette
 	{
 		Media.disk_rom_file = pDiskROM;
@@ -286,6 +390,16 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 					}
 				}
 			}
+		}
+
+		if (m_bRebootRequest)
+		{
+			// Ctrl+Alt+Suppr : disquettes et journal sur la carte, puis
+			// redémarrage (main.cpp : reboot)
+			oric_machine_flush_disks ();
+			JournalPrintf ("Redemarrage (Ctrl+Alt+Suppr)\n");
+			JournalFlush ();
+			return ShutdownReboot;
 		}
 
 		if (m_bPerfRequest)
@@ -573,6 +687,13 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
 			s_pThis->m_bPerfRequest = true;
 			continue;
 		}
+		if (   ucKey == 0x4C			// Ctrl+Alt+Suppr : redémarrage
+		    && (ucModifiers & (LCTRL | RCTRL))
+		    && (ucModifiers & (ALT | ALTGR)))
+		{
+			s_pThis->m_bRebootRequest = true;
+			continue;
+		}
 		if (ucKey == 0x4C)			// Suppr = BKSP (comme Phosphoric)
 		{
 			ucKey = 0x2A;
@@ -667,8 +788,8 @@ static u16 s_Weight[MAX_OUT_WIDTH];	// sa part, sur 256 (le reste au point suiva
 // Calcule l'agrandissement une fois pour toutes (cœur 0, avant l'émulation).
 void CKernel::SetupDisplay (void)
 {
-	const char *pPixels = mOptions.GetAppOptionString ("pixels", "tele");
-	const char *pColors = mOptions.GetAppOptionString ("couleurs", "tele");
+	const char *pPixels = Option ("pixels", "tele");
+	const char *pColors = Option ("couleurs", "tele");
 	bool bTelePixels = strcmp (pPixels, "carres") != 0;
 	m_bTeleColors = strcmp (pColors, "pures") != 0;
 

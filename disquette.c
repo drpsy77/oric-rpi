@@ -184,6 +184,10 @@ void disquette_service(emulator_t* emu) {
         return;
     }
     if (s_calme < 0 || ++s_calme < DISQUETTE_DELAI_TRAMES) return;
+    disquette_flush(emu);
+}
+
+void disquette_flush(emulator_t* emu) {
     s_calme = -1;
 
     /* Disquettes de LOCI (dsk_image : secteurs à plat, comme sedoric_load) */

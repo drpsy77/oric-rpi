@@ -20,4 +20,8 @@ void disquette_set_microdisc_path(int drive, const char* path);
  * modifiées après DISQUETTE_DELAI_TRAMES trames sans écriture. */
 void disquette_service(emulator_t* emu);
 
+/* Réécrit tout de suite ce qui a changé (avant un redémarrage). L'émulation
+ * doit être arrêtée (entre deux trames). */
+void disquette_flush(emulator_t* emu);
+
 #endif /* DISQUETTE_H */
