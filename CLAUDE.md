@@ -93,6 +93,7 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
 |---|---|
 | `kernel.cpp/.h` | cœur 0 : clavier USB, son HDMI, Wi-Fi, température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) |
 | `oric_machine.c/.h` | colle extraite de `main.c` de Phosphoric, API C opaque |
+| `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture), cœur 1 entre deux trames |
 | `journal.cpp/.h` | journal en mémoire (verrou entre cœurs), écrit par le cœur 0 |
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
@@ -176,8 +177,11 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
 - Défauts de Phosphoric dans `docs/phosphoric-f8.md` (à envoyer à bmarty) :
   F8 sous CP/A (contourné) ; Entrée du menu (reprise de session) jamais
   possible ; ACIA de LOCI qui écrase les octets non lus (contourné).
-- Disquettes MFM servies par LOCI : écritures perdues à la fin de la session
-  (« no MFM re-encoder », Phosphoric).
+- Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
+  MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
+  pistes changées réécrites sur place 2 s après la dernière écriture (banc
+  natif : identique à `sedoric_save`). À essayer sur la 3B+ (5ᵉ point de
+  `docs/phosphoric-f8.md`).
 
 ## Banc d'essai natif (sans la Pi)
 

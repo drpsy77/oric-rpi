@@ -1,4 +1,4 @@
-# Signalement pour Phosphoric : bouton Action de LOCI (F8), reprise de session, ACIA de LOCI (pertes, cadence)
+# Signalement pour Phosphoric : bouton Action de LOCI (F8), reprise de session, ACIA de LOCI (pertes, cadence), disquettes jamais réécrites
 
 À envoyer à bmarty (Phosphoric 2.30.0, commit 675cb06). Observé sur le port
 Circle (Pi 3B+), analysé dans le code ; **pas encore reproduit** avec
@@ -112,3 +112,21 @@ ACIA sans cadence (transfert instantané, comme à débit 0), ou une option.
 Contournement dans le port : `acia_write` détourné par l'éditeur de liens
 (`--wrap`) ; après chaque écriture, `rx_reload` et `tx_reload` sont remis à 1
 (`oric_machine.c`). `modemcadence=1` rend la cadence de Phosphoric.
+
+## Cinquième point : les disquettes de LOCI ne sont jamais réécrites
+
+`loci_dsk_open` (`src/io/loci_bus.c`) charge le `.dsk` en mémoire ; les
+écritures de l'Oric ne vont que dans cette copie. `loci_dsk_flush` ne la
+réécrit qu'au démontage ou à l'arrêt de LOCI, et jamais pour une `MFM_DISK`
+(« writes are session-only (no MFM re-encoder) »), alors que `sedoric.c` sait
+réinjecter les secteurs (`sedoric_save_mfm`, utilisé pour le Microdisc) :
+LOCI libère le conteneur MFM gardé par `sedoric_load`. Le Microdisc, lui,
+note `disk_dirty` mais ne réécrit qu'à la sortie. Le vrai LOCI écrit sur la
+clé au fil de l'eau : on peut retirer la clé sans rien éteindre. Proposition :
+garder le conteneur MFM dans LOCI et réécrire les pistes modifiées peu après
+l'écriture (ou à chaque secteur), pour LOCI comme pour le Microdisc.
+
+Contournement dans le port (`disquette.c`) : 2 s après la dernière écriture
+(`disk_modified` du contrôleur de LOCI, `disk_dirty` du Microdisc), les
+pistes qui diffèrent du fichier sont réinjectées (copie de
+`mfm_inject_track`) et réécrites sur place.

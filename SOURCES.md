@@ -57,6 +57,7 @@ captures AVI/images, traces/profilage, CLI, hostfs, fast-load et auto-frappe.
 |---|---|---|
 | `phosphoric_stubs.c` | Fonctions vides pour les cartes exclues et le disque HTTP, jamais appelées car ces cartes sont absentes | Signatures recopiées des en-têtes de Phosphoric |
 | `oric_machine.c` | Callbacks bus/IRQ/PSG/clavier, `emulator_init`, boucle de trame, chargement ROM/TAP/disquettes, étape LOCI, bouton Action, rapport clavier HID | **Extrait de `src/main.c` de Phosphoric** (`main_setup_*`, `sdl_function_key` F8 et `SDL_KEYUP`) et de `src/io/loci_glue.c` (`loci_sync_kbd_from_sdl`), uniquement par suppression de branches (marquées `[port]`) ; plus de petites fonctions d'accès en fin de fichier, écrites pour le port |
+| `disquette.c/.h` | Réécriture sur la carte SD des pistes modifiées des `.dsk` (LOCI et Microdisc), 2 s après la dernière écriture de l'Oric | Écrit pour le port, sauf `mfm_crc16` et `mfm_inject_track`, **copiées de `src/storage/sedoric.c`** de Phosphoric (fonctions statiques) |
 | `oric_machine.h` | API C opaque entre la machine et le kernel (le C++ ne voit aucun en-tête de Phosphoric, qui utilise `_Atomic`) | Écrit pour le port |
 | `newlib_compat.c` | `access()` (pour `card_microdisc.c`), `popen()`/`pclose()` et `getifaddrs()` (pour `serial_picowifi.c`, échec propre), absentes de circle-newlib | Écrit pour le port |
 | `compat/ifaddrs.h` | `<ifaddrs.h>`, absent de circle-newlib | Écrit pour le port (déclarations POSIX/BSD habituelles) |

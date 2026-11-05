@@ -27,6 +27,7 @@
 #include "savestate.h"
 #include "rom_patches.h"
 #include "utils/logging.h"
+#include "disquette.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -361,7 +362,10 @@ bool oric_machine_init(const oric_media_t* media) {
     cfg.rom_file = media->rom_file;
     cfg.disk_rom_file = media->disk_rom_file;
     for (int i = 0; i < MICRODISC_MAX_DRIVES; i++)
+    {
         cfg.disk_files[i] = media->disk_files[i];
+        disquette_set_microdisc_path(i, media->disk_files[i]);   /* [port] réécriture */
+    }
     /* --fdc-timing fast|real (lu par card_microdisc.c) */
     cfg.fdc_timing_arg = media->fdc_timing;
     /* cli_opts_init : réglages fins LOCI désactivés (-1) */
@@ -520,6 +524,10 @@ void oric_machine_run_frame(void) {
 
     /* Finishes the frame (remaining lines if the CPU stopped midway). */
     emu_clock_frame_end(emu);
+
+    /* [port] Réécriture des .dsk modifiés sur la carte SD (disquette.c) :
+     * Phosphoric ne le fait qu'à la sortie, qui n'arrive jamais sur la Pi. */
+    disquette_service(emu);
 }
 
 /* ── Accès pour le kernel Circle (ajout du port) ───────────────────────── */
