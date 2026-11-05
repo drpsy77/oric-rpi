@@ -88,7 +88,9 @@ LOCI ; c'est la Pi qui se connecte au Wi-Fi. Il faut à la racine de la carte
 le dossier `firmware/` (fichiers `brcmfmac*`, obtenus par `make firmware` dans
 `libs/circle/addon/wlan/firmware` de circle-stdlib) et `wpa_supplicant.conf`
 (modèle dans `sdcard/`, à compléter avec le nom du réseau et le mot de passe).
-L'adresse obtenue est notée dans `oric/journal.txt`.
+L'adresse obtenue est notée dans `oric/journal.txt`. L'ACIA du modem n'est
+pas cadencée (comme sur le vrai LOCI) ; `modemcadence=1` rend la cadence de
+Phosphoric (9600 bauds).
 
 Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action du LOCI (retour au
 menu), F12 = ajoute une mesure de performance à

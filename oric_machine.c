@@ -317,6 +317,31 @@ static bool load_tape(emulator_t* emu, const char* tape_file) {
     return emu->tape_loaded;
 }
 
+/* ── [port] ACIA sans cadence (ajout du port) ──────────────────────────── */
+/* Phosphoric cadence l'ACIA sur le débit de son registre de contrôle (9600
+ * bauds : ~1040 cycles par octet reçu, ~1180 par octet envoyé). Le vrai LOCI
+ * n'en a pas : son ACIA est dans le firmware et le modem est sur l'USB. Il
+ * n'y a pas d'option : acia_update_timing (statique) recalcule rx_reload et
+ * tx_reload à chaque écriture du registre de contrôle ou de commande. Le port
+ * détourne donc acia_write (--wrap, voir Makefile) et remet les deux au
+ * minimum après chaque écriture : c'est le transfert instantané de Phosphoric
+ * (débit 0), où la réception interroge le modem toutes les 32 cycles
+ * (ACIA_RX_POLL_FLOOR). Signalé à bmarty (docs/phosphoric-f8.md). */
+static bool s_acia_free;
+
+static void acia_no_cadence(acia6551_t* acia) {
+    acia->rx_reload = 1;
+    acia->tx_reload = 1;
+    if (acia->tx_cycles > 1) acia->tx_cycles = 1;
+    if (acia->rx_cycles > 1) acia->rx_cycles = 1;
+}
+
+void __real_acia_write(acia6551_t* acia, uint16_t addr, uint8_t value);
+void __wrap_acia_write(acia6551_t* acia, uint16_t addr, uint8_t value) {
+    __real_acia_write(acia, addr, value);
+    if (s_acia_free) acia_no_cadence(acia);
+}
+
 /* ── Instance unique de la machine (main() : « emulator_t emu; ») ─────── */
 static emulator_t s_emu;                   /* ~2,7 Mo : hors pile */
 
@@ -383,6 +408,12 @@ bool oric_machine_init(const oric_media_t* media) {
      * card_acia.c ne l'active que pour --serial tcp: (docs/phosphoric-f8.md). */
     if (media->serial && emu->card_on[CARD_IDX_acia])
         acia_set_rx_backpressure(&emu->acia, true);
+    /* [port] ACIA sans cadence (voir __wrap_acia_write) */
+    if (media->serial && emu->card_on[CARD_IDX_acia] && !media->serial_cadence) {
+        s_acia_free = true;
+        acia_no_cadence(&emu->acia);
+        log_info("ACIA: no baud-rate cadence (port, like the real LOCI)");
+    }
 
     /* main_setup_loci */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_LOCI) != 0) return false;

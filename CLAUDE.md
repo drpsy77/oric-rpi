@@ -79,7 +79,8 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 - avec LOCI : `loci=1`, **sans** `rom=` (la ROM système est le menu) ;
   `oric/loci/` = flash « 0: » (`locirom`, `basic11b.rom`, `microdis.rom`),
   `oric/usb/` = clé « 1: » (`.dsk`, `.tap`) ; le menu ne voit rien d'autre ;
-- `modem=1` : modem Wi-Fi de LOCI.
+- `modem=1` : modem Wi-Fi de LOCI ; ACIA sans cadence (`modemcadence=1`
+  pour la cadence de Phosphoric, 9600 bauds).
 
 Fichiers écrits par le noyau : `oric/journal.txt` (journal de Phosphoric,
 session précédente dans `journal-precedent.txt`), `oric/perf.txt` (F12, une
@@ -112,7 +113,11 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
   3B+ redescend à 600 MHz après ~1 min), `Update()` dans la boucle du cœur 0 ;
   ralentit au-delà de `socmaxtemp` (60 °C par défaut).
 - **Multicœur** : `CEmuCores` (`CMultiCoreSupport`) ; le cœur 0 demande une
-  trame quand la file du son en a besoin, le cœur 1 la calcule. Le cœur 0
+  trame toutes les 20 ms du timer, le cœur 1 la calcule. La file du son ne
+  fait que corriger la dérive (moyenne sur 1 s, ±200 µs par trame au plus) :
+  le son HDMI la vide par blocs de ~43 ms, et cadencer dessus donnait des
+  trames par paires puis un trou (saccades). Écran en 50 Hz : `hdmi_group=1`,
+  `hdmi_mode=31` dans `config.txt`. Le cœur 0
   n'utilise la carte SD (journal, F12) qu'entre deux trames.
 - **Ordonnanceur** : `CStdlibAppNetwork` crée un `CScheduler`, cœur 0
   seulement. circle-newlib y rend la main dans les sockets **et dans
@@ -120,6 +125,14 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
   cœur 0. Le cœur 0 appelle `mScheduler.Yield()` et `NetRelayService()` à
   chaque tour de boucle. Tout nouvel appel de circle-newlib depuis le cœur 1
   qui rendrait la main (`Yield`) doit être relayé.
+- Connexion TCP établie (`connect`, `accept`) : plus de relais pour les
+  données. Le cœur 0 (`NetRelayService`) lit la socket dans une file de 8 Ko
+  (seulement s'il y reste `FRAME_BUFFER_SIZE` : Circle rend un segment entier)
+  et envoie la file de 4 Ko remplie par le cœur 1 ; `poll`/`read`/`write` du
+  cœur 1 ne voient que les files (un écrivain, un lecteur, `DataMemBarrier`).
+  `close` : le cœur 0 envoie le reste puis ferme.
+- ACIA sans cadence : `[port]` dans `oric_machine.c`, `acia_write` détourné
+  (`--wrap`) ; `rx_reload`/`tx_reload` remis à 1 après chaque écriture.
 - Sockets de circle-newlib : pas de `O_NONBLOCK` (fcntl → ENOSYS) ; le relais
   le mémorise et lit par `recv(MSG_DONTWAIT)`. DNS : pas de noms `.local`.
 - Affichage : le firmware agrandit le framebuffer à l'écran en gardant les
@@ -205,16 +218,17 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    vrai LOCI (ACIA du firmware, USB) n'en a pas. Mesuré sur le banc natif
    (collage de 980 caractères, contre-pression) : écran complet 5,6 s → 1,9 s,
    police 5,4 s → 2,3 s, écran après collage 3,4 s → 0,6 s, aucune perte.
-   Pas d'option : contournement `[port]` envisagé (remettre `rx_reload` /
-   `tx_reload` au minimum à chaque trame, car `acia_update_timing` les
-   recalcule à chaque écriture du registre de contrôle), et 4ᵉ point du
-   signalement pour bmarty.
+   **Fait (05/11/2026), à essayer sur la 3B+** : `[port]` par `--wrap` de
+   `acia_write` (`oric_machine.c`), option `modemcadence=1` ; 4ᵉ point de
+   `docs/phosphoric-f8.md`.
 2. **Lecture anticipée par le cœur 0**, indispensable avec le point 1 : sans
    cadence, l'ACIA interroge le modem toutes les 32 cycles (`poll` relayé :
    des dizaines de milliers d'allers-retours par seconde). Le cœur 0 lirait
    lui-même les sockets (`recv` non bloquant) dans le tampon de
    `netrelay.cpp` ; le cœur 1 ne consulterait que ce tampon (une file à un
-   écrivain et un lecteur), sans relais pour `poll` ni `recv`.
+   écrivain et un lecteur), sans relais pour `poll` ni `recv`. **Fait
+   (05/11/2026), à essayer** : files de réception et d'émission dans
+   `netrelay.cpp` (voir Points techniques).
 3. Envoyer `docs/phosphoric-f8.md` à bmarty (Pierre).
 4. Pour CP/A : « LOCI allégé » (API fichiers seule, servie depuis la SD).
 5. Ouverts : pas de menu de choix des supports sans LOCI ; `scaling_kernel=8`

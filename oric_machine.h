@@ -32,6 +32,9 @@ typedef struct {
     const char* loci_flash_dir;  /* dossier = mémoire flash interne « 0: » */
     const char* loci_usb_dir;    /* dossier = clé USB « 1: » (NULL : aucune) */
     const char* serial;          /* --serial (ex. "picowifi" : modem Wi-Fi) ; NULL : aucun */
+    bool        serial_cadence;  /* ACIA cadencée sur son registre de contrôle
+                                    (9600 bauds...) ; false : sans cadence,
+                                    comme l'ACIA du vrai LOCI */
 } oric_media_t;
 
 /* Initialise la machine, charge les supports, fait le reset CPU.

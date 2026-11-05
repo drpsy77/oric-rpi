@@ -1,4 +1,4 @@
-# Signalement pour Phosphoric : bouton Action de LOCI (F8), reprise de session, ACIA de LOCI
+# Signalement pour Phosphoric : bouton Action de LOCI (F8), reprise de session, ACIA de LOCI (pertes, cadence)
 
 À envoyer à bmarty (Phosphoric 2.30.0, commit 675cb06). Observé sur le port
 Circle (Pi 3B+), analysé dans le code ; **pas encore reproduit** avec
@@ -92,3 +92,23 @@ perte.
 
 Contournement dans le port : `oric_machine_init` passe `--serial-buffer 256`
 et active la contre-pression avec le modem.
+
+## Quatrième point : l'ACIA de LOCI est cadencée comme une vraie 6551
+
+Phosphoric cadence l'ACIA sur le débit de son registre de contrôle : à 9600
+bauds, ~1040 cycles par octet reçu et ~1180 par octet envoyé. Le vrai LOCI
+n'a pas cette limite : son ACIA est dans le firmware et le modem (Pico W) est
+sur l'USB ; le firmware modifié de cpa-oric (`tools/pico-modem`) dépasse
+largement 9600 bauds. Il n'y a pas d'option : `acia_update_timing` recalcule
+`rx_reload` et `tx_reload` à chaque écriture du registre de contrôle ou de
+commande, et `--serial-baud` ne vaut que pour l'horloge externe.
+
+Mesuré en natif (CP/A, console à distance, collage de 980 caractères,
+contre-pression, `baud = 0` forcé dans `acia_update_timing` pour l'essai) :
+écran complet 5,6 s → 1,9 s, police 5,4 s → 2,3 s, écran après collage
+3,4 s → 0,6 s, aucune perte. Proposition : sous `--loci` avec le picowifi,
+ACIA sans cadence (transfert instantané, comme à débit 0), ou une option.
+
+Contournement dans le port : `acia_write` détourné par l'éditeur de liens
+(`--wrap`) ; après chaque écriture, `rx_reload` et `tx_reload` sont remis à 1
+(`oric_machine.c`). `modemcadence=1` rend la cadence de Phosphoric.

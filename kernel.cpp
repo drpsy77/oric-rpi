@@ -27,6 +27,8 @@
 //   modem=1                       modem Wi-Fi de LOCI (picowifi de Phosphoric,
 //                                 ACIA en $0380) ; firmware/ et
 //                                 wpa_supplicant.conf à la racine de la carte
+//   modemcadence=1                ACIA du modem cadencée sur son débit (9600
+//                                 bauds) ; défaut 0 : sans cadence, comme LOCI
 // Journal de Phosphoric : oric/journal.txt (session précédente :
 // oric/journal-precedent.txt). Émulation sur le cœur 1, le reste sur le cœur 0.
 // Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action de LOCI (comme
@@ -50,6 +52,9 @@
 #define FRAME_US        ORIC_FRAME_US               // une trame PAL Oric = 20 ms
 #define MAX_SAMPLES     1024                        // > 882 (44,1 kHz / 50)
 #define SOUND_QUEUE_MS  100
+#define CHUNK_WORDS     (384 * 10)                  // bloc du son HDMI : 1920 échantillons stéréo
+#define SOUND_TARGET    (3 * 882)                   // réserve moyenne visée : ~60 ms
+#define MAX_CORRECTION_US 200                       // ±1 % au plus
 #define STATS_FRAMES    500                         // mesure toutes les 10 s
 
 static const char FromOric[] = "oric";
@@ -180,6 +185,8 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// Réglages du modem gardés par AT&W (numéros abrégés...) : dans la
 		// mémoire flash de LOCI, comme sur le vrai Pico W
 		setenv ("PHOSPHORIC_PICOWIFI_NVRAM", "oric/loci/picowifi.cfg", 1);
+		// ACIA sans cadence (comme le vrai LOCI), sauf modemcadence=1
+		Media.serial_cadence = mOptions.GetAppOptionDecimal ("modemcadence", 0) == 1;
 	}
 	Media.loci = mOptions.GetAppOptionDecimal ("loci", 0) == 1;
 	Media.loci_flash_dir = mOptions.GetAppOptionString ("lociflash", "oric/loci");
@@ -215,10 +222,18 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	DataMemBarrier ();
 	m_bMachineReady = true;			// le cœur 1 peut démarrer
 
+	// Cadence : une trame toutes les 20 ms du timer, régulière. Le son HDMI
+	// prend sa file par blocs de ~43 ms (CHUNK_WORDS) : cadencer sur sa file
+	// donnait des trames par paires suivies d'un trou (saccades). La file ne
+	// sert plus qu'à corriger lentement l'écart entre l'horloge du son et le
+	// timer (nCorrection, quelques µs par trame), sur sa moyenne de 1 s.
 	unsigned nWritten = 0;			// trames dont le son est parti
 	unsigned nDeadline = CTimer::GetClockTicks ();
-	unsigned nWaitStart = nDeadline;
 	unsigned nLastFlush = nDeadline;
+	bool bPrimed = m_pSound == 0;		// file du son remplie au démarrage
+	unsigned nShortWrites = 0;		// écritures refusées d'affilée (file pleine)
+	unsigned nLevelSum = 0, nLevelCount = 0;
+	int nCorrection = 0;			// µs ajoutées à chaque trame
 
 	while (true)
 	{
@@ -237,12 +252,40 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// Trame faite : le cœur 1 attend, on peut toucher au son et aux fichiers
 		if (nWritten != m_nFramesDone)
 		{
+			nWritten = m_nFramesDone;
 			if (m_pSound != 0)
 			{
-				m_pSound->Write (s_SoundBuf, s_nSamplesFrame * 2 * sizeof (int16_t));
+				int nBytes = s_nSamplesFrame * 2 * sizeof (int16_t);
+				nShortWrites = m_pSound->Write (s_SoundBuf, nBytes) < nBytes ? nShortWrites + 1 : 0;
+				if (nShortWrites > 10)
+				{
+					// le son ne se vide plus (pas de récepteur HDMI audio ?)
+					mLogger.Write (FromOric, LogWarning, "Son HDMI bloque, cadence sur le timer");
+					m_pSound->Cancel ();
+					m_pSound = 0;
+					bPrimed = true;
+					nCorrection = 0;
+				}
+				else if (bPrimed)
+				{
+					nLevelSum += m_pSound->GetQueueFramesAvail ();
+					if (++nLevelCount == 50)
+					{
+						// excès moyen de la file, résorbé en ~5 s (250 trames)
+						int nExcess = (int) (nLevelSum / 50) - (int) SOUND_TARGET;
+						nCorrection = (int) (nExcess * 1000000LL / oric_machine_audio_rate () / 250);
+						if (nCorrection > MAX_CORRECTION_US)
+						{
+							nCorrection = MAX_CORRECTION_US;
+						}
+						else if (nCorrection < -MAX_CORRECTION_US)
+						{
+							nCorrection = -MAX_CORRECTION_US;
+						}
+						nLevelSum = nLevelCount = 0;
+					}
+				}
 			}
-			nWritten = m_nFramesDone;
-			nWaitStart = CTimer::GetClockTicks ();
 		}
 
 		if (m_bPerfRequest)
@@ -257,20 +300,13 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			nLastFlush = CTimer::GetClockTicks ();
 		}
 
-		// Cadence 50 Hz : sur l'horloge du son si actif, sinon sur le timer
-		if (m_pSound != 0)
+		if (!bPrimed)
 		{
-			if (m_pSound->GetQueueFramesAvail () > 3 * s_nSamplesFrame)	// ~60 ms d'avance
+			// Démarrage : trames sans attendre jusqu'à la réserve de son
+			if (m_pSound->GetQueueFramesAvail () >= SOUND_TARGET)
 			{
-				if (CTimer::GetClockTicks () - nWaitStart > 10 * FRAME_US)
-				{
-					// le son ne se vide plus (pas de récepteur HDMI audio ?)
-					mLogger.Write (FromOric, LogWarning, "Son HDMI bloque, cadence sur le timer");
-					m_pSound->Cancel ();
-					m_pSound = 0;
-					nDeadline = CTimer::GetClockTicks ();
-				}
-				continue;
+				bPrimed = true;
+				nDeadline = CTimer::GetClockTicks ();
 			}
 		}
 		else
@@ -279,7 +315,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			{
 				continue;
 			}
-			nDeadline += FRAME_US;
+			nDeadline += FRAME_US + nCorrection;
 			if ((int) (CTimer::GetClockTicks () - nDeadline) > 5 * FRAME_US)
 			{
 				nDeadline = CTimer::GetClockTicks ();	// trop en retard : on recale
@@ -396,7 +432,7 @@ void CKernel::RunEmulation (void)
 // n'a pas de sortie jack, le son passe par le HDMI.
 void CKernel::StartSound (void)
 {
-	m_pSound = new CHDMISoundBaseDevice (&mInterrupt, oric_machine_audio_rate (), 384 * 10);
+	m_pSound = new CHDMISoundBaseDevice (&mInterrupt, oric_machine_audio_rate (), CHUNK_WORDS);
 
 	if (   !m_pSound->AllocateQueue (SOUND_QUEUE_MS)
 	    || (m_pSound->SetWriteFormat (SoundFormatSigned16, 2), !m_pSound->Start ()))

@@ -65,6 +65,14 @@ port, par l'option `--wrap` de l'éditeur de liens (`socket`, `connect`,
 cœur 0, qui l'exécute et rend le résultat. Presque tout est non bloquant ;
 seule la composition (`ATDT`) arrête l'émulation le temps de la connexion TCP.
 
+Une fois la connexion établie, les données ne sont plus relayées : l'ACIA,
+sans cadence (comme celle du vrai LOCI, `modemcadence=1` pour la cadence de
+Phosphoric), interroge le modem toutes les 32 cycles. Le cœur 0 lit lui-même
+la socket (`recv` non bloquant) dans une file de 8 Ko et envoie ce que le
+cœur 1 dépose dans une file de 4 Ko ; `poll`, `read` et `write` du modem ne
+consultent que ces files. File de réception pleine, le cœur 0 ne lit plus et
+la fenêtre TCP retient l'émetteur.
+
 ## Étapes
 
 1. Journal `oric/journal.txt` et émulation sur le cœur 1 (sans réseau) :

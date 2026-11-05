@@ -48,4 +48,7 @@ NETRELAY_WRAP = socket connect bind listen accept getsockname getsockopt \
 		setsockopt recv send poll getaddrinfo _read _write _close _fcntl
 LDFLAGS += $(foreach f,$(NETRELAY_WRAP),--wrap=$(f))
 
+# ACIA sans cadence, comme le vrai LOCI (oric_machine.c, __wrap_acia_write)
+LDFLAGS += --wrap=acia_write
+
 -include $(DEPS)

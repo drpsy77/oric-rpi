@@ -6,3 +6,8 @@ kernel=kernel8-32.img
 #hdmi_drive=2
 # Points nets au lieu du léger flou de l'agrandissement (à essayer).
 #scaling_kernel=8
+# Écran en 50 Hz comme l'Oric (sinon 60 Hz : une image sur cinq affichée deux
+# fois, saccades). CEA mode 31 = 1080p 50 Hz ; 19 = 720p 50 Hz si l'écran
+# refuse. Écran noir : commenter ces deux lignes.
+hdmi_group=1
+hdmi_mode=31
