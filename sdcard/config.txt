@@ -1,13 +1,42 @@
 # config.txt — Pi 3B+ / Zero 2 W, kernel8-32.img (Circle, 32 bits, multicœur)
+# Lu par le firmware avant le noyau : ces réglages ne peuvent pas aller dans
+# oric.cfg. Pas de section [...] dans ce fichier.
 arm_64bit=0
 kernel=kernel8-32.img
+
 # Décommenter si l'écran est vu comme DVI (pas de son HDMI) : force le mode
 # HDMI, donc le son.
 #hdmi_drive=2
-# Points nets au lieu du léger flou de l'agrandissement (à essayer).
+
+# ── Mode de l'écran : un seul bloc actif ─────────────────────────────────
+# L'Oric fait 50 images/s : à 60 Hz, une image sur cinq est montrée deux fois
+# (léger saccadé des défilements). Écran noir, une ligne sur deux ou
+# scintillement : essayer le bloc suivant.
+#
+# A. Mode préféré de l'écran (souvent 1080p 60 Hz) : aucune ligne hdmi_*.
+#    Actif : progressif, natif de l'écran de Pierre.
+#
+# B. 720p 50 Hz (tous les téléviseurs européens)
+#hdmi_group=1
+#hdmi_mode=19
+#
+# C. 1080p 50 Hz (une ligne sur deux et scintillement sur l'écran de Pierre)
+#hdmi_group=1
+#hdmi_mode=31
+#
+# D. 576p 50 Hz (PAL, 720x576, 4:3 ; 18 pour 16:9)
+#hdmi_group=1
+#hdmi_mode=17
+#
+# E. 720p 60 Hz
+#hdmi_group=1
+#hdmi_mode=4
+
+# Couleurs : RGB complet (0-255). En mode « CEA » (hdmi_group=1) le firmware
+# envoie sinon 16-235, que beaucoup d'écrans montrent délavé (noir gris,
+# couleurs pâles). Noirs bouchés ou blancs brûlés : commenter.
+hdmi_pixel_encoding=2
+
+# Agrandissement par le GPU : par défaut un léger flou (proportions gardées,
+# bandes noires sur les côtés). scaling_kernel=8 : points nets, sans flou.
 #scaling_kernel=8
-# Écran en 50 Hz comme l'Oric (sinon 60 Hz : une image sur cinq affichée deux
-# fois, saccades). CEA mode 31 = 1080p 50 Hz ; 19 = 720p 50 Hz si l'écran
-# refuse. Écran noir : commenter ces deux lignes.
-hdmi_group=1
-hdmi_mode=31

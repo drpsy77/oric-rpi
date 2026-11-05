@@ -14,6 +14,9 @@
 //                                 590x448 pour pixels=tele, 240x224 pour carres
 //   pixels=tele|carres            forme des points (défaut tele, 1,23:1)
 //   couleurs=tele|pures           couleurs du téléviseur ou 00/FF (défaut tele)
+//   saturation=100 luminosite=100 couleurs plus vives / plus claires (en %)
+//   rouge=FF2A1A ...              une couleur imposée (RRGGBB) : noir, rouge,
+//                                 vert, jaune, bleu, magenta, cyan, blanc
 //   keymap=FR                     clavier AZERTY (lettres A/Q, Z/W, M, ; ,)
 //   rom=oric/basic11b.rom         ROM système (défaut)
 //   diskrom=oric/microdis.rom     ROM du Microdisc  } les deux pour activer
@@ -92,7 +95,6 @@ CKernel::CKernel (void)
 	m_pKeyboard (0),
 	m_pSound (0),
 	m_bAzerty (false),
-	m_bTeleColors (true),
 	m_nScaleY (1),
 	m_nOutWidth (0), m_nOutHeight (0),
 	m_nOffsetX (0), m_nOffsetY (0),
@@ -766,6 +768,8 @@ void CKernel::WritePerf (void)
 //   pixels=carres : points carrés (comme Oricutron) ; width=240 height=224
 //   couleurs=tele : les 6 couleurs comme sur le téléviseur de Pierre (réglage
 //                   de cpa-oric, docs/console-distance.md § 9) ; =pures : 00/FF
+//   saturation=, luminosite= (en %, défaut 100), puis rouge=RRGGBB... : la
+//                   palette des 8 couleurs, calculée une fois
 // En hauteur, chaque ligne est répétée un nombre entier de fois ; en largeur,
 // chaque point de l'écran prend la part des points de l'Oric qu'il couvre :
 // au plus un point adouci par bord, comme la page web de cpa-oric.
@@ -782,6 +786,18 @@ static const u8 s_TeleRGB[8][3] =
 	{0x0A, 0x3C, 0xFF}, {0xEE, 0x22, 0xEE}, {0x18, 0xE8, 0xE8}, {0xFF, 0xFF, 0xFF}
 };
 
+// Palette affichée (SetupDisplay), et noms des couleurs dans oric.cfg
+static u8 s_Palette[8][3];
+static const char *const s_ColorName[8] =
+{
+	"noir", "rouge", "vert", "jaune", "bleu", "magenta", "cyan", "blanc"
+};
+
+static u8 Clamp255 (int nValue)
+{
+	return nValue < 0 ? 0 : nValue > 255 ? 255 : nValue;
+}
+
 static u16 s_SrcCol[MAX_OUT_WIDTH];	// point de l'Oric à gauche de chaque point de l'écran
 static u16 s_Weight[MAX_OUT_WIDTH];	// sa part, sur 256 (le reste au point suivant)
 
@@ -791,7 +807,44 @@ void CKernel::SetupDisplay (void)
 	const char *pPixels = Option ("pixels", "tele");
 	const char *pColors = Option ("couleurs", "tele");
 	bool bTelePixels = strcmp (pPixels, "carres") != 0;
-	m_bTeleColors = strcmp (pColors, "pures") != 0;
+	bool bTeleColors = strcmp (pColors, "pures") != 0;
+	int nSaturation = OptionDecimal ("saturation", 100);
+	int nBrightness = OptionDecimal ("luminosite", 100);
+
+	for (unsigned i = 0; i < 8; i++)
+	{
+		u8 *pRGB = s_Palette[i];
+		for (unsigned c = 0; c < 3; c++)
+		{
+			pRGB[c] = bTeleColors ? s_TeleRGB[i][c] : (i >> c & 1) * 0xFF;
+		}
+
+		// Saturation autour du gris de même luminance, puis luminosité
+		int nGray = (pRGB[0] * 77 + pRGB[1] * 150 + pRGB[2] * 29) >> 8;
+		for (unsigned c = 0; c < 3; c++)
+		{
+			int nValue = nGray + (pRGB[c] - nGray) * nSaturation / 100;
+			pRGB[c] = Clamp255 (nValue * nBrightness / 100);
+		}
+
+		const char *pValue = Option (s_ColorName[i]);	// rouge=FF2A1A
+		if (pValue != 0)
+		{
+			char *pEnd;
+			unsigned long nRGB = strtoul (pValue, &pEnd, 16);
+			if (*pEnd == '\0' && pEnd - pValue == 6)
+			{
+				pRGB[0] = nRGB >> 16;
+				pRGB[1] = nRGB >> 8;
+				pRGB[2] = nRGB;
+			}
+			else
+			{
+				JournalPrintf ("Affichage : %s=%s ignore (RRGGBB attendu)\n",
+					       s_ColorName[i], pValue);
+			}
+		}
+	}
 
 	int nSrcWidth, nSrcHeight;
 	oric_machine_framebuffer (&nSrcWidth, &nSrcHeight);
@@ -844,9 +897,18 @@ void CKernel::SetupDisplay (void)
 		memset (pDest + y * nPitch, 0, nFBWidth * sizeof (u16));
 	}
 
-	JournalPrintf ("Affichage : framebuffer %ux%u, image %ux%u, pixels=%s, couleurs=%s\n",
+	JournalPrintf ("Affichage : framebuffer %ux%u, image %ux%u, pixels=%s, couleurs=%s,"
+		       " saturation=%d, luminosite=%d\n",
 		       nFBWidth, nFBHeight, m_nOutWidth, m_nOutHeight,
-		       bTelePixels ? "tele" : "carres", m_bTeleColors ? "tele" : "pures");
+		       bTelePixels ? "tele" : "carres", bTeleColors ? "tele" : "pures",
+		       nSaturation, nBrightness);
+	JournalPrintf ("Palette :");
+	for (unsigned i = 0; i < 8; i++)
+	{
+		JournalPrintf (" %s=%02X%02X%02X", s_ColorName[i],
+			       s_Palette[i][0], s_Palette[i][1], s_Palette[i][2]);
+	}
+	JournalPrintf ("\n");
 	if (m_nOutWidth < nWanted || m_nOutHeight < (unsigned) nSrcHeight)
 	{
 		JournalPrintf ("Affichage : framebuffer trop petit, mettre %s dans cmdline.txt\n",
@@ -867,7 +929,7 @@ void CKernel::Blit (void)
 		return;
 	}
 
-	static u8 Line[MAX_SRC_WIDTH][3];	// ligne de l'Oric, couleurs Tele appliquées
+	static u8 Line[MAX_SRC_WIDTH][3];	// ligne de l'Oric, palette appliquée
 
 	for (unsigned y = 0; y < m_nOutHeight / m_nScaleY; y++)
 	{
@@ -875,14 +937,11 @@ void CKernel::Blit (void)
 		for (int x = 0; x < nSrcWidth; x++, pIn += 3)
 		{
 			const u8 *pRGB = pIn;
-			if (m_bTeleColors)
+			unsigned r = pIn[0], g = pIn[1], b = pIn[2];
+			if (   (r == 0 || r == 0xFF) && (g == 0 || g == 0xFF)
+			    && (b == 0 || b == 0xFF))
 			{
-				unsigned r = pIn[0], g = pIn[1], b = pIn[2];
-				if (   (r == 0 || r == 0xFF) && (g == 0 || g == 0xFF)
-				    && (b == 0 || b == 0xFF))
-				{
-					pRGB = s_TeleRGB[(r & 1) | (g & 2) | (b & 4)];
-				}
+				pRGB = s_Palette[(r & 1) | (g & 2) | (b & 4)];
 			}
 			Line[x][0] = pRGB[0];
 			Line[x][1] = pRGB[1];

@@ -71,8 +71,7 @@ private:
 	CSoundBaseDevice *m_pSound;
 	bool m_bAzerty;
 
-	// Affichage (pixels=, couleurs=), calculé par SetupDisplay
-	bool m_bTeleColors;
+	// Affichage (pixels=, couleurs=...), calculé par SetupDisplay
 	unsigned m_nScaleY;				// répétition de chaque ligne
 	unsigned m_nOutWidth, m_nOutHeight;		// taille de l'image dans le framebuffer
 	unsigned m_nOffsetX, m_nOffsetY;		// position (centrée)

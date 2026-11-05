@@ -73,7 +73,8 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 
 `cmdline.txt` :
 - commun : `width=590 height=448 keymap=FR` (`pixels=tele` par défaut,
-  `pixels=carres` avec `width=240 height=224` ; `couleurs=tele|pures`) ;
+  `pixels=carres` ; `couleurs=tele|pures`, `saturation=`, `luminosite=` en %,
+  `rouge=RRGGBB`... pour les 8 couleurs, palette notée dans le journal) ;
 - sans LOCI : `rom=oric/basic11b.rom`, plus `diskrom=oric/microdis.rom
   disk=oric/xxx.dsk` pour le Microdisc ;
 - avec LOCI : `loci=1`, **sans** `rom=` (la ROM système est le menu) ;
@@ -90,7 +91,8 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   les disquettes en plus vont sur la clé.
 - `oric/loci/oric.cfg` (`0:ORIC.CFG` pour l'Oric) : mêmes réglages que
   `cmdline.txt` (sauf `width`, `height`, `lociflash`), qui y sont remplacés ;
-  `nom=valeur`, `#` commentaire ; noté dans le journal. Modèle `sdcard/`.
+  `nom=valeur`, `#` commentaire ; noté dans le journal. Modèle `sdcard/`
+  complet (toutes les options en commentaire), en ASCII (lu sous CP/A).
 - Ctrl+Alt+Suppr : disquettes réécrites, journal, puis redémarrage.
 
 Fichiers écrits par le noyau : `oric/journal.txt` (journal de Phosphoric,
@@ -148,6 +150,10 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
   (`--wrap`) ; `rx_reload`/`tx_reload` remis à 1 après chaque écriture.
 - Sockets de circle-newlib : pas de `O_NONBLOCK` (fcntl → ENOSYS) ; le relais
   le mémorise et lit par `recv(MSG_DONTWAIT)`. DNS : pas de noms `.local`.
+- Écran : `config.txt` propose des blocs (A mode préféré actif, 60 Hz natif de l'écran de Pierre ; B 720p50,
+  C 1080p50, D 576p50, E 720p60). 1080p50 (`hdmi_mode=31`) donnait sur
+  l'écran de Pierre une ligne sur deux et un scintillement, et des couleurs
+  pâles : en CEA le firmware sort du 16-235, d'où `hdmi_pixel_encoding=2`.
 - Affichage : le firmware agrandit le framebuffer à l'écran en gardant les
   proportions, avec un léger flou (`scaling_kernel=8` dans `config.txt` pour
   des points nets, à essayer). `pixels=tele` : 590x448 (lignes doublées,

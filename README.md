@@ -70,8 +70,10 @@ Avec LOCI, `oric/loci/` est sa mémoire flash interne (« 0: ») et
 Options de `cmdline.txt` (une seule ligne) : `width=590 height=448`
 (taille de l'image envoyée à l'écran), `pixels=tele` (défaut : points 1,23
 fois plus larges que hauts, comme sur un téléviseur PAL) ou `pixels=carres`
-(avec `width=240 height=224`), `couleurs=tele` (défaut : couleurs d'un
-téléviseur) ou `couleurs=pures`,
+(image plus étroite), `couleurs=tele` (défaut : couleurs d'un
+téléviseur) ou `couleurs=pures`, `saturation=` et `luminosite=` (en %,
+défaut 100), une couleur imposée par `rouge=RRGGBB` (`noir`, `rouge`, `vert`,
+`jaune`, `bleu`, `magenta`, `cyan`, `blanc`),
 `keymap=FR` (AZERTY), `rom=`, `diskrom=` + `disk=` (les deux pour activer le
 Microdisc), `tape=`, `fdctiming=fast` (Microdisc sans délais mécaniques ; par
 défaut `real`, vitesse du vrai lecteur).
@@ -98,7 +100,12 @@ montre le menu avec A: rempli, `USBMOUNT` monte les autres depuis la clé.
 
 Réglages modifiables depuis l'Oric : `oric/loci/oric.cfg` (`0:ORIC.CFG` pour
 LOCI), mêmes noms que dans `cmdline.txt`, qu'ils remplacent (sauf `width`,
-`height`, `lociflash`). Modèle dans `sdcard/`.
+`height`, `lociflash`). Modèle complet (toutes les options, en commentaire,
+en ASCII pour CP/A) dans `sdcard/`.
+
+Mode de l'écran (50 ou 60 Hz, 720p, 1080p, 576p) : blocs à choisir dans
+`config.txt` (lu par le firmware, donc pas dans `oric.cfg`), ainsi que
+`hdmi_pixel_encoding=2` (couleurs non délavées).
 
 Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action du LOCI (retour au
 menu), F12 = ajoute une mesure de performance à
