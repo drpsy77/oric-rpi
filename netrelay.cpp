@@ -10,9 +10,17 @@
 // ENOSYS) ; le modem en a besoin pour lire sans attendre. Le relais retient
 // donc l'option pour chaque socket et lit alors par recv (MSG_DONTWAIT).
 //
+// La pile TCP de Circle rend un segment entier à chaque lecture ; ce qui ne
+// tient pas dans le tampon de l'appelant est perdu (circle/net/socket.h :
+// « at least FRAME_BUFFER_SIZE, otherwise data may get lost »). Le modem lit
+// par petits morceaux (la place libre de sa file). Le relais lit donc chaque
+// segment dans un tampon par socket et le rend morceau par morceau ; poll()
+// signale ce qui y reste.
+//
 #include "netrelay.h"
 
 #include <circle/multicore.h>
+#include <circle/netdevice.h>
 #include <circle/synchronize.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -21,6 +29,7 @@
 #include <stdarg.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <string.h>
 
 #define MAX_FDS		64
 
@@ -32,6 +41,20 @@ static unsigned char s_FdFlags[MAX_FDS];	// SOCKET, NONBLOCK
 static bool IsSocket (int fd)
 {
 	return fd >= 0 && fd < MAX_FDS && (s_FdFlags[fd] & FD_SOCKET);
+}
+
+// Segments reçus, rendus morceau par morceau (un seul lecteur : le cœur 1)
+struct TRxBuffer
+{
+	unsigned nHead, nTail;
+	unsigned char Data[FRAME_BUFFER_SIZE];
+};
+static TRxBuffer *s_pRxBuffer[MAX_FDS];
+
+static unsigned RxPending (int fd)
+{
+	TRxBuffer *p = IsSocket (fd) ? s_pRxBuffer[fd] : 0;
+	return p != 0 ? p->nTail - p->nHead : 0;
 }
 
 // ── Demande au cœur 0 ────────────────────────────────────────────────────
@@ -134,6 +157,11 @@ int __wrap_socket (int domain, int type, int protocol)
 	if (fd >= 0 && fd < MAX_FDS)
 	{
 		s_FdFlags[fd] = FD_SOCKET;
+		if (s_pRxBuffer[fd] == 0)
+		{
+			s_pRxBuffer[fd] = new TRxBuffer;
+		}
+		s_pRxBuffer[fd]->nHead = s_pRxBuffer[fd]->nTail = 0;
 	}
 	return fd;
 }
@@ -186,6 +214,11 @@ int __wrap_accept (int fd, struct sockaddr *addr, socklen_t *len)
 	if (nNew >= 0 && nNew < MAX_FDS)
 	{
 		s_FdFlags[nNew] = FD_SOCKET;
+		if (s_pRxBuffer[nNew] == 0)
+		{
+			s_pRxBuffer[nNew] = new TRxBuffer;
+		}
+		s_pRxBuffer[nNew]->nHead = s_pRxBuffer[nNew]->nTail = 0;
 	}
 	return nNew;
 }
@@ -229,14 +262,51 @@ static long CallRecv (void *p)
 	TIOArgs *a = (TIOArgs *) p;
 	return __real_recv (a->fd, a->buf, a->len, a->flags);
 }
+// Lecture d'une socket par le tampon : segment suivant si le tampon est vide
+static ssize_t ReadSocket (int fd, void *buf, size_t len, int flags)
+{
+	TRxBuffer *p = s_pRxBuffer[fd];
+	if (p == 0)
+	{
+		TIOArgs a = {fd, buf, len, flags};
+		return Relay (CallRecv, &a);
+	}
+
+	if (p->nHead == p->nTail)
+	{
+		TIOArgs a = {fd, p->Data, sizeof p->Data, flags};
+		ssize_t nResult = Relay (CallRecv, &a);
+		if (nResult <= 0)
+		{
+			return nResult;		// rien (EWOULDBLOCK), fin, ou erreur
+		}
+		p->nHead = 0;
+		p->nTail = nResult;
+	}
+
+	size_t nCopy = p->nTail - p->nHead;
+	if (nCopy > len)
+	{
+		nCopy = len;
+	}
+	memcpy (buf, p->Data + p->nHead, nCopy);
+	p->nHead += nCopy;
+
+	return nCopy;
+}
+
 ssize_t __wrap_recv (int fd, void *buf, size_t len, int flags)
 {
-	if (IsSocket (fd) && (s_FdFlags[fd] & FD_NONBLOCK))
+	if (!IsSocket (fd))
+	{
+		TIOArgs a = {fd, buf, len, flags};
+		return Relay (CallRecv, &a);
+	}
+	if (s_FdFlags[fd] & FD_NONBLOCK)
 	{
 		flags |= MSG_DONTWAIT;
 	}
-	TIOArgs a = {fd, buf, len, flags};
-	return Relay (CallRecv, &a);
+	return ReadSocket (fd, buf, len, flags);
 }
 static long CallSend (void *p)
 {
@@ -257,6 +327,22 @@ static long CallPoll (void *p)
 }
 int __wrap_poll (struct pollfd fds[], nfds_t nfds, int timeout)
 {
+	// Données déjà dans un tampon : prêtes, sans demander à la pile TCP
+	int nReady = 0;
+	for (nfds_t i = 0; i < nfds; i++)
+	{
+		fds[i].revents = 0;
+		if ((fds[i].events & POLLIN) && RxPending (fds[i].fd) > 0)
+		{
+			fds[i].revents = POLLIN;
+			nReady++;
+		}
+	}
+	if (nReady > 0)
+	{
+		return nReady;
+	}
+
 	TPollArgs a = {fds, nfds, timeout};
 	return (int) Relay (CallPoll, &a);
 }
@@ -283,23 +369,13 @@ int __wrap_getaddrinfo (const char *node, const char *service,
 // la main à l'ordonnanceur).
 
 struct TRWArgs { int fd; char *ptr; int len; };
-static long CallRead (void *p)
-{
-	TRWArgs *a = (TRWArgs *) p;
-	if (s_FdFlags[a->fd] & FD_NONBLOCK)
-	{
-		return __real_recv (a->fd, a->ptr, a->len, MSG_DONTWAIT);
-	}
-	return __real__read (a->fd, a->ptr, a->len);
-}
 int __wrap__read (int fd, char *ptr, int len)
 {
 	if (!IsSocket (fd))
 	{
 		return __real__read (fd, ptr, len);
 	}
-	TRWArgs a = {fd, ptr, len};
-	return (int) Relay (CallRead, &a);
+	return (int) ReadSocket (fd, ptr, len, (s_FdFlags[fd] & FD_NONBLOCK) ? MSG_DONTWAIT : 0);
 }
 
 static long CallWrite (void *p)
@@ -326,6 +402,10 @@ int __wrap__close (int fd)
 	if (fd >= 0 && fd < MAX_FDS)
 	{
 		s_FdFlags[fd] = 0;
+		if (s_pRxBuffer[fd] != 0)
+		{
+			s_pRxBuffer[fd]->nHead = s_pRxBuffer[fd]->nTail = 0;
+		}
 	}
 	return (int) Relay (CallClose, &fd);
 }

@@ -27,6 +27,11 @@ git clone --recursive https://github.com/smuehlst/circle-stdlib.git
 cd circle-stdlib && ./configure -r 3 -o ARM_ALLOW_MULTI_CORE && make
 (cd libs/circle/boot && make)                     # firmware du Pi
 (cd libs/circle/addon/wlan/firmware && make firmware)   # firmware Wi-Fi
+# pilote Wi-Fi recompilé avec les en-têtes de circle-newlib (sinon jmp_buf
+# de la mauvaise taille et plantage au démarrage avec modem=1)
+STDLIB=$PWD
+(cd libs/circle/addon/wlan && ./makeall --nosample clean && \
+ EXTRAINCLUDE="-isystem $STDLIB/install/arm-none-circle/include" ./makeall --nosample)
 
 # 2. cloner Phosphoric (version validée : 675cb06)
 git clone https://github.com/benedictemarty/Phosphoric.git phosphoric

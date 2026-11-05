@@ -19,6 +19,7 @@
 #include "emulator.h"
 #include "card_module.h"
 #include "cli/cli_opts.h"
+#include "io/acia6551.h"
 #include "io/io_bus.h"
 #include "io/tape_patches.h"
 #include "io/loci_glue.h"
@@ -356,9 +357,17 @@ bool oric_machine_init(const oric_media_t* media) {
     if (media->serial) {
         static const struct option no_core_options[] = { { 0, 0, 0, 0 } };
         const struct option* opts = card_modules_long_options(no_core_options);
-        for (int i = 0; opts[i].name; i++)
+        for (int i = 0; opts[i].name; i++) {
             if (strcmp(opts[i].name, "serial") == 0)
                 card_modules_set_option(cfg.card_cfg, opts[i].val, media->serial);
+            /* [port] --serial-buffer 256 : sans file, l'ACIA de Phosphoric
+             * écrase l'octet non lu (OVERRUN) et le pilote de CP/A, qui
+             * scrute l'ACIA, perd la moitié de chaque demande de la console
+             * à distance. Le vrai LOCI ne prend au modem que ce que l'Oric
+             * a lu (docs/phosphoric-f8.md, troisième point). */
+            if (strcmp(opts[i].name, "serial-buffer") == 0)
+                card_modules_set_option(cfg.card_cfg, opts[i].val, "256");
+        }
     }
 
     /* main_setup_machine */
@@ -367,6 +376,13 @@ bool oric_machine_init(const oric_media_t* media) {
 
     /* main_setup_serial_cards (ACIA 6551 et son modem) */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_SERIAL) != 0) return false;
+    /* [port] Contre-pression : file de l'ACIA pleine, l'octet reste dans le
+     * modem, qui cesse alors de lire la liaison TCP. Comme le vrai LOCI, qui
+     * ne prend au modem que ce que l'Oric a lu. Sans elle, un texte collé
+     * dans la console à distance perd des lettres (OVERRUN, FIFO full).
+     * card_acia.c ne l'active que pour --serial tcp: (docs/phosphoric-f8.md). */
+    if (media->serial && emu->card_on[CARD_IDX_acia])
+        acia_set_rx_backpressure(&emu->acia, true);
 
     /* main_setup_loci */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_LOCI) != 0) return false;

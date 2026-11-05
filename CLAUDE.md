@@ -47,6 +47,18 @@ RPI 400 par un lecteur USB, apparaît en `/dev/sda1` (étiquette ORIC) ; la
 monter par `udisksctl mount -b /dev/sda1` (→ `/media/pi/ORIC`), la démonter
 par `udisksctl unmount -b /dev/sda1` avant que Pierre la retire.
 
+**Après chaque `make` de circle-stdlib**, recompiler le pilote Wi-Fi avec
+les en-têtes de circle-newlib (voir Leçons) :
+
+```
+cd /home/pi/Projets/circle-stdlib/libs/circle/addon/wlan
+./makeall --nosample clean
+EXTRAINCLUDE="-isystem /home/pi/Projets/circle-stdlib/install/arm-none-circle/include" ./makeall --nosample
+```
+
+puis `rm -f kernel8-32.elf && make` ici (le Makefile ne voit pas le
+changement de bibliothèque).
+
 Changer une option de `./configure` : `make mrproper` d'abord (sinon newlib
 refuse : « CFLAGS has changed »), puis configure et make (une vingtaine de
 minutes).
@@ -124,22 +136,86 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
   compilent pas dans circle-stdlib).
 - « Aucune règle pour fabriquer kernel.h » : fichier versionné effacé,
   `git restore .`.
+- `core0: Data abort` au démarrage avec `modem=1`, PC dans `setjmp`, LR dans
+  `etherbcmattach` (`arm-none-eabi-addr2line -f -e kernel8-32.elf <PC> <LR>`) :
+  avec GCC, circle-stdlib compile les bibliothèques de Circle avec les
+  en-têtes newlib du système (`/usr/include/newlib`, paquet Debian), où
+  `jmp_buf` fait 23 × 4 octets ; le `setjmp` lié est celui de circle-newlib,
+  qui en écrit 104 (`jmp_buf` de 20 × 8). La pile d'erreurs du pilote Wi-Fi
+  (`p9error.h`) déborde sur son compteur. Correction : recompiler
+  `addon/wlan` avec `EXTRAINCLUDE` (ci-dessus). Les autres bibliothèques de
+  Circle liées n'utilisent pas `setjmp`.
 
-## État (05/11/2026)
+## État (05/11/2026, fin d'après-midi)
 
 - Pi 3B+, LOCI, CP/A : image, son, clavier, F8 répétés (puis Échap), stable.
   À 1400 MHz : ~6,7 ms/trame en BASIC, ~6,9 ms avec LOCI (budget 20 ms).
-- Défauts de Phosphoric signalés dans `docs/phosphoric-f8.md` (à envoyer à
-  bmarty) : F8 sous CP/A (contourné dans `oric_machine_loci_button`) ;
-  Entrée du menu (reprise de session) jamais possible.
+- **Console à distance de cpa-oric : marche** depuis la 3B+ en Wi-Fi
+  (`modem=1`) : `REMOTE <nom de HOSTS ou IP>` vers `remote.py serve` de la
+  RPI 400 (port 2324), vitrine et VPS (cycleamen.fr/cpa/) compris. Session de
+  11 min : 5272 trames, aucune refusée, collages de la vitrine (1024 touches)
+  sans perte. Le DNS de Circle ne connaît pas les noms de la box : le nom doit
+  être dans `HOSTS` de la disquette (Pierre le tient hors de Git).
+- Corrections qui l'ont permis : pilote Wi-Fi recompilé (`jmp_buf`, voir
+  Leçons) ; relais : tampon de 1600 octets par socket (Circle rend un segment
+  entier par lecture) ; `[port]` dans `oric_machine_init` : `--serial-buffer
+  256` et contre-pression de l'ACIA (`acia_set_rx_backpressure`).
+- Défauts de Phosphoric dans `docs/phosphoric-f8.md` (à envoyer à bmarty) :
+  F8 sous CP/A (contourné) ; Entrée du menu (reprise de session) jamais
+  possible ; ACIA de LOCI qui écrase les octets non lus (contourné).
 - Disquettes MFM servies par LOCI : écritures perdues à la fin de la session
   (« no MFM re-encoder », Phosphoric).
-- Modem Wi-Fi (`modem=1`) écrit, à essayer : `REMOTE <IP de la Pi 400>`
-  dans CP/A vers `remote.py serve` (port 2324). Étude : `docs/wifi.md`.
 
-## Prochaines étapes envisagées
+## Banc d'essai natif (sans la Pi)
 
-1. Essayer le modem avec la chaîne de cpa-oric (démon, vitrine, VPS).
-2. Pour CP/A : « LOCI allégé » (API fichiers seule, servie depuis la SD).
-3. Ouverts : pas de menu de choix des supports sans LOCI (on édite
-   `cmdline.txt`) ; `scaling_kernel=8` à essayer.
+Phosphoric compilé pour Linux (`make -j4` dans une **copie** de
+`/home/pi/Projets/phosphoric`, binaire `oric1-emu`), même `cpa.dsk`,
+`basic11b.rom`, `microdis.rom` (copiés depuis la carte, `oric/loci/`) :
+
+```
+python3 tools/remote.py serve --port 2325 --http 8041 --log essai.log &   # dans cpa-oric
+HOME=. oric1-emu -n --realtime --no-config -m atmos -r basic11b.rom \
+  --disk-rom microdis.rom --disk cpa.dsk --loci --loci-flash flash --loci-usb usb \
+  --serial picowifi:x --serial-buffer 256 --serial-trace trace.txt \
+  --type-keys "15000000:R\p1E\p1M...\p1\n" -c 110000000 \
+  --screenshot-text-at 100000000:ecran.txt
+python3 tools/remote.py --demon http://localhost:8041 coller texte.txt    # pendant l'appel
+```
+
+- Taper `REMOTE 127.0.0.1:2325` lettre par lettre (`\p1` entre chaque) :
+  sinon CP/A perd des touches au démarrage.
+- **Avec LOCI** (`--loci`) : sans lui, CP/A prend l'ACIA d'Oricutron ($031C)
+  et compose sans « - » : mode telnet, non représentatif.
+- `trace.txt` : chaque octet, et « OVERRUN » si un octet est écrasé.
+- Le démon de test sur 2325/8041 ne gêne pas celui de Pierre (2324/8040).
+  Ne pas lancer `remote.py serve --help` : il démarre un démon.
+- La contre-pression et le transfert sans cadence n'ont pas d'option :
+  essais faits en ajoutant dans la copie de Phosphoric un test de variable
+  d'environnement (`card_acia.c` après `acia_set_backend` ; `acia6551.c`
+  `acia_update_timing`, `baud = 0`). Ne jamais modifier le clone.
+
+## Prochaines étapes
+
+**But : les mêmes performances qu'avec le vrai Oric** (vrai LOCI + Pico W au
+firmware modifié, `cpa-oric/tools/pico-modem`, qui dépasse 9600 bauds) ; ce
+que l'émulateur fait moins bien est à remonter à bmarty.
+
+1. **ACIA de LOCI sans cadence.** Phosphoric cadence l'ACIA sur les 9600 bauds
+   du registre de contrôle (~1040 cycles par octet reçu, ~1180 envoyé) ; le
+   vrai LOCI (ACIA du firmware, USB) n'en a pas. Mesuré sur le banc natif
+   (collage de 980 caractères, contre-pression) : écran complet 5,6 s → 1,9 s,
+   police 5,4 s → 2,3 s, écran après collage 3,4 s → 0,6 s, aucune perte.
+   Pas d'option : contournement `[port]` envisagé (remettre `rx_reload` /
+   `tx_reload` au minimum à chaque trame, car `acia_update_timing` les
+   recalcule à chaque écriture du registre de contrôle), et 4ᵉ point du
+   signalement pour bmarty.
+2. **Lecture anticipée par le cœur 0**, indispensable avec le point 1 : sans
+   cadence, l'ACIA interroge le modem toutes les 32 cycles (`poll` relayé :
+   des dizaines de milliers d'allers-retours par seconde). Le cœur 0 lirait
+   lui-même les sockets (`recv` non bloquant) dans le tampon de
+   `netrelay.cpp` ; le cœur 1 ne consulterait que ce tampon (une file à un
+   écrivain et un lecteur), sans relais pour `poll` ni `recv`.
+3. Envoyer `docs/phosphoric-f8.md` à bmarty (Pierre).
+4. Pour CP/A : « LOCI allégé » (API fichiers seule, servie depuis la SD).
+5. Ouverts : pas de menu de choix des supports sans LOCI ; `scaling_kernel=8`
+   à essayer.
