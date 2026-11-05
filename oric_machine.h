@@ -46,9 +46,9 @@ bool oric_machine_init(const oric_media_t* media);
 /* Exécute une trame PAL complète (19 968 cycles = 20 ms d'Oric). */
 void oric_machine_run_frame(void);
 
-/* Réécrit sur la carte SD les disquettes modifiées, sans attendre (avant un
- * redémarrage ; émulation arrêtée). */
-void oric_machine_flush_disks(void);
+/* Arrêt (Ctrl+Alt+Fin, Ctrl+Alt+Suppr ; émulation arrêtée) : disquettes
+ * modifiées réécrites, fichiers de LOCI fermés. Plus de trame ensuite. */
+void oric_machine_shutdown(void);
 
 /* Reset (F5 de Phosphoric) et NMI (bouton sous l'Oric, Maj+F5). */
 void oric_machine_reset(void);

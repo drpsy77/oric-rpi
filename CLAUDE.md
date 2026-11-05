@@ -95,7 +95,11 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   `cmdline.txt` (sauf `width`, `height`, `lociflash`), qui y sont remplacés ;
   `nom=valeur`, `#` commentaire ; noté dans le journal. Modèle `sdcard/`
   complet (toutes les options en commentaire), en ASCII (lu sous CP/A).
-- Ctrl+Alt+Suppr : disquettes réécrites, journal, puis redémarrage.
+- Ctrl+Alt+Suppr : disquettes réécrites, fichiers de LOCI fermés
+  (`loci_cleanup`), journal, puis redémarrage. Ctrl+Alt+Fin : pareil, carte
+  démontée (`Cleanup`), message à l'écran, LED fixe, arrêt : seul moment
+  sûr pour débrancher. Pas de touche de fonction (utilisées par les
+  émulateurs).
 
 Fichiers écrits par le noyau : `oric/journal.txt` (journal de Phosphoric,
 session précédente dans `journal-precedent.txt`), `oric/perf.txt` (F12, une
@@ -156,6 +160,11 @@ mesure ajoutée par appui),
   C 1080p50, D 576p50, E 720p60). 1080p50 (`hdmi_mode=31`) donnait sur
   l'écran de Pierre une ligne sur deux et un scintillement, et des couleurs
   pâles : en CEA le firmware sort du 16-235, d'où `hdmi_pixel_encoding=2`.
+- Journal de Circle (`mLogger`) : à l'écran jusqu'à l'image de l'Oric, puis
+  `CPanicScreen` (seules les paniques, texte en gras) ; le reste est lu dans
+  la mémoire du logger et recopié dans `oric/journal.txt` (`LogToJournal`,
+  toutes les 2 s). Il défilait sur l'image (flashs, Wi-Fi qui cherche un
+  réseau absent).
 - Affichage : le firmware agrandit le framebuffer à l'écran en gardant les
   proportions, avec un léger flou (`scaling_kernel=8` dans `config.txt` pour
   des points nets, à essayer). `pixels=tele` : 590x448 (lignes doublées,

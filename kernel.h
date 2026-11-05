@@ -15,6 +15,20 @@
 
 class CKernel;
 
+// Cible du journal de Circle une fois l'image de l'Oric affichée : ses
+// messages défilaient sur l'écran (flashs par-dessus l'image). Seules les
+// paniques (texte en gras, logger.cpp) y vont encore ; les autres restent
+// dans la mémoire du logger, recopiée dans oric/journal.txt (LogToJournal).
+class CPanicScreen : public CDevice
+{
+public:
+	CPanicScreen (CDevice *pScreen) : m_pScreen (pScreen) {}
+	int Write (const void *pBuffer, size_t nCount);
+
+private:
+	CDevice *m_pScreen;
+};
+
 // Cœur 1 : l'émulation, sans interruption (CMultiCoreSupport de Circle,
 // voir doc/multicore.txt). Les cœurs 2 et 3 s'arrêtent tout de suite.
 class CEmuCores : public CMultiCoreSupport
@@ -46,6 +60,8 @@ private:
 	void UpdateNetwork (void);
 	void Blit (void);
 	void WritePerf (void);
+	void LogToJournal (void);
+	void ShowHalted (void);
 
 	// Réglages : oric.cfg (dossier de lociflash=) d'abord, puis cmdline.txt
 	void ReadSettings (void);
@@ -62,6 +78,7 @@ private:
 	CCPUThrottle m_CPUThrottle;
 
 	CEmuCores m_EmuCores;
+	CPanicScreen m_PanicScreen;
 
 	// Modem Wi-Fi (modem=1) : réseau démarré sans attendre la connexion
 	bool m_bModem;
@@ -81,6 +98,7 @@ private:
 	volatile bool m_bNMIRequest;
 	volatile bool m_bPerfRequest;			// celle-ci par le cœur 0
 	volatile bool m_bRebootRequest;			// Ctrl+Alt+Suppr, cœur 0 aussi
+	volatile bool m_bHaltRequest;			// Ctrl+Alt+Fin, cœur 0 aussi
 
 	// LOCI : bouton Action (F8) et rapport clavier HID
 	volatile bool m_bLociDown;

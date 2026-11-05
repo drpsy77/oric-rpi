@@ -110,7 +110,13 @@ Mode de l'écran (50 ou 60 Hz, 720p, 1080p, 576p) : blocs à choisir dans
 Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action du LOCI (retour au
 menu), F12 = ajoute une mesure de performance à
 `oric/perf.txt`, Ctrl+Alt+Suppr = disquettes réécrites, puis redémarrage de
-la Pi.
+la Pi, **Ctrl+Alt+Fin = arrêt** : disquettes réécrites, carte SD démontée,
+puis « Oric arrete : vous pouvez debrancher. » à l'écran (LED allumée fixe).
+Débrancher à ce moment-là seulement : la Pi écrit sur la carte pendant le jeu
+(journal, disquettes).
+
+Les messages de Circle (Wi-Fi, USB) ne s'affichent qu'au démarrage ; ensuite
+ils vont dans `oric/journal.txt` (sauf un plantage, montré à l'écran).
 
 ## Merci
 

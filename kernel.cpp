@@ -40,7 +40,9 @@
 // oric/journal-precedent.txt). Émulation sur le cœur 1, le reste sur le cœur 0.
 // Touches : F5 = reset, Maj+F5 = NMI, F8 = bouton Action de LOCI (comme
 //           Phosphoric), F12 = ajoute une mesure de performance à oric/perf.txt,
-//           Ctrl+Alt+Suppr = disquettes réécrites, puis redémarrage de la Pi.
+//           Ctrl+Alt+Suppr = disquettes réécrites, puis redémarrage de la Pi,
+//           Ctrl+Alt+Fin = idem, puis arrêt : la Pi peut être débranchée
+//           (message à l'écran, LED allumée fixe).
 //
 #include "kernel.h"
 #include "oric_machine.h"
@@ -90,6 +92,7 @@ CKernel::CKernel (void)
 :	CStdlibAppNetwork (FromOric, CSTDLIBAPP_DEFAULT_PARTITION, 0, 0, 0, 0, NetDeviceTypeWLAN),
 	m_CPUThrottle (CPUSpeedMaximum),
 	m_EmuCores (this),
+	m_PanicScreen (&mScreen),
 	m_bModem (false),
 	m_bNetStarting (false),
 	m_pKeyboard (0),
@@ -102,6 +105,7 @@ CKernel::CKernel (void)
 	m_bNMIRequest (false),
 	m_bPerfRequest (false),
 	m_bRebootRequest (false),
+	m_bHaltRequest (false),
 	m_bLociDown (false),
 	m_bLociUp (false),
 	m_bHIDChanged (false),
@@ -233,6 +237,48 @@ unsigned CKernel::OptionDecimal (const char *pName, unsigned nDefault)
 	return mOptions.GetAppOptionDecimal (pName, nDefault);
 }
 
+// Ctrl+Alt+Fin : écran noir et message (police de Circle, 8x16), LED fixe.
+// La carte est démontée juste après (main.cpp), puis la Pi s'arrête.
+void CKernel::ShowHalted (void)
+{
+	CBcmFrameBuffer *pFrameBuffer = mScreen.GetFrameBuffer ();
+	u16 *pDest = (u16 *) (uintptr) pFrameBuffer->GetBuffer ();
+	unsigned nPitch = pFrameBuffer->GetPitch () / sizeof (u16);
+	for (unsigned y = 0; y < pFrameBuffer->GetHeight (); y++)
+	{
+		memset (pDest + y * nPitch, 0, pFrameBuffer->GetWidth () * sizeof (u16));
+	}
+
+	static const char Message[] = "Oric arrete : vous pouvez debrancher.";
+	char Text[80];
+	snprintf (Text, sizeof Text, "\x1b[%u;%uH%s",
+		  mScreen.GetRows () / 2,
+		  (mScreen.GetColumns () - (sizeof Message - 1)) / 2 + 1, Message);
+	mScreen.Write (Text, strlen (Text));
+	mActLED.On ();
+}
+
+// Messages de Circle (Wi-Fi, USB...) : de la mémoire du logger au journal.
+void CKernel::LogToJournal (void)
+{
+	char Text[200];
+	int nLength;
+	while ((nLength = mLogger.Read (Text, sizeof Text - 1)) > 0)
+	{
+		Text[nLength] = '\0';
+		JournalPrintf ("%s", Text);
+	}
+}
+
+int CPanicScreen::Write (const void *pBuffer, size_t nCount)
+{
+	if (nCount >= 4 && memcmp (pBuffer, "\x1b[1m", 4) == 0)
+	{
+		return m_pScreen->Write (pBuffer, nCount);	// panique : visible
+	}
+	return nCount;
+}
+
 // Cœur 0 : le réseau est prêt dès que le Wi-Fi a une adresse (DHCP).
 void CKernel::UpdateNetwork (void)
 {
@@ -319,6 +365,8 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		mLogger.Write (FromOric, LogPanic, "Initialisation de l'Oric impossible (voir oric/journal.txt)");
 	}
 	SetupDisplay ();
+	mLogger.SetNewTarget (&m_PanicScreen);	// plus de messages sur l'image
+	LogToJournal ();
 	JournalFlush ();
 
 	s_nSamplesFrame = oric_machine_audio_rate () * FRAME_US / 1000000;	// 882
@@ -394,24 +442,43 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			}
 		}
 
-		if (m_bRebootRequest)
+		if (m_bRebootRequest || m_bHaltRequest)
 		{
-			// Ctrl+Alt+Suppr : disquettes et journal sur la carte, puis
-			// redémarrage (main.cpp : reboot)
-			oric_machine_flush_disks ();
-			JournalPrintf ("Redemarrage (Ctrl+Alt+Suppr)\n");
+			// Ctrl+Alt+Suppr, Ctrl+Alt+Fin : le cœur 1 attend la trame
+			// suivante, qui ne viendra plus. Disquettes, fichiers de LOCI et
+			// journal sur la carte ; main.cpp démonte ensuite la carte
+			// (Cleanup : f_mount) puis redémarre ou arrête la Pi.
+			if (m_pSound != 0)
+			{
+				m_pSound->Cancel ();
+			}
+			oric_machine_shutdown ();
+			JournalPrintf (m_bHaltRequest ? "Arret (Ctrl+Alt+Fin)\n"
+						      : "Redemarrage (Ctrl+Alt+Suppr)\n");
+			if (pJournal != 0)
+			{
+				fflush (pJournal);
+			}
+			LogToJournal ();
 			JournalFlush ();
-			return ShutdownReboot;
+			if (!m_bHaltRequest)
+			{
+				return ShutdownReboot;
+			}
+			ShowHalted ();
+			return ShutdownHalt;
 		}
 
 		if (m_bPerfRequest)
 		{
 			m_bPerfRequest = false;
+			LogToJournal ();
 			JournalFlush ();
 			WritePerf ();
 		}
 		if (CTimer::GetClockTicks () - nLastFlush > 2000000)	// toutes les 2 s
 		{
+			LogToJournal ();
 			JournalFlush ();
 			nLastFlush = CTimer::GetClockTicks ();
 		}
@@ -689,11 +756,18 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
 			s_pThis->m_bPerfRequest = true;
 			continue;
 		}
-		if (   ucKey == 0x4C			// Ctrl+Alt+Suppr : redémarrage
-		    && (ucModifiers & (LCTRL | RCTRL))
+		if (   (ucKey == 0x4C || ucKey == 0x4D)	// Ctrl+Alt+Suppr : redémarrage
+		    && (ucModifiers & (LCTRL | RCTRL))	// Ctrl+Alt+Fin : arrêt
 		    && (ucModifiers & (ALT | ALTGR)))
 		{
-			s_pThis->m_bRebootRequest = true;
+			if (ucKey == 0x4C)
+			{
+				s_pThis->m_bRebootRequest = true;
+			}
+			else
+			{
+				s_pThis->m_bHaltRequest = true;
+			}
 			continue;
 		}
 		if (ucKey == 0x4C)			// Suppr = BKSP (comme Phosphoric)

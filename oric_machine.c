@@ -474,9 +474,16 @@ bool oric_machine_init(const oric_media_t* media) {
     return true;
 }
 
-/* [port] Ctrl+Alt+Suppr : disquettes réécrites avant le redémarrage */
-void oric_machine_flush_disks(void) {
-    disquette_flush(&s_emu);
+/* ── main.c : emulator_cleanup (branche LOCI) ──────────────────────────── */
+/* [port] Ctrl+Alt+Fin, Ctrl+Alt+Suppr : disquettes réécrites (disquette.c,
+ * avant loci_cleanup qui libère les images), puis fichiers de LOCI fermés. */
+void oric_machine_shutdown(void) {
+    emulator_t* emu = &s_emu;
+    disquette_flush(emu);
+    if (emu->card_on[CARD_IDX_loci]) {
+        loci_cleanup(&emu->loci);
+    }
+    log_info("Shutting down emulator");
 }
 
 /* main.c sdl_function_key : F5 = cpu_reset, Maj+F5 = cpu_nmi */
