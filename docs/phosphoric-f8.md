@@ -1,72 +1,27 @@
-# Signalement pour Phosphoric : bouton Action de LOCI (F8), reprise de session, ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage
+# Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage
 
-À envoyer à bmarty (Phosphoric 2.30.0, commit 675cb06). Observé sur le port
-Circle (Pi 3B+), analysé dans le code ; **pas encore reproduit** avec
-Phosphoric sur PC.
+À envoyer à bmarty. Constaté sur le port Circle (Pi 3B+) et sur Phosphoric
+natif (Linux) ; les quatre points sont revus sur **Phosphoric 2.31.15**
+(commit `acfeacc`) : `acia6551.c`, `card_acia.c`, `loci_bus.c` et
+`sedoric.c` n'ont pas changé depuis 2.30.0, où ils ont été observés.
 
-## Symptôme
+## Déjà corrigé en 2.31.6 (merci)
 
-LOCI en émulation de haut niveau (`--loci -r roms/loci/locirom`), CP/A démarré
-depuis le menu LOCI (disquette Microdisc servie par LOCI). Un appui sur F8 ne
-montre pas le menu : CP/A redémarre à chaud. Les appuis suivants sont sans
-effet (le journal dit « LOCI: Action button inside the menu — ignored »).
+Deux défauts relevés sur 2.30.0 sont corrigés par « LOCI intégré : RETURN
+reprend la session après le bouton Action » :
 
-## Cause
+- F8 sous CP/A (RAM overlay à la place de la ROM, ROMDIS du Microdisc) :
+  le menu restait caché et CP/A redémarrait à chaud. Le relâchement mémorise
+  maintenant `overlay_active` et `basic_rom_disabled`, les remet à faux et
+  la reprise les rétablit.
+- RETURN du menu jamais possible (marque `'L'` absente de la XRAM, routine
+  `mia_save_state` sautée).
 
-CP/A s'installe dans la RAM overlay (`$C000-$FFFF`, ROMDIS du Microdisc :
-`memory.basic_rom_disabled = true`, `overlay_active = false`).
+Vérifié en natif avec CP/A (`--control`, `DIR`, `loci-button`, RETURN) :
+le menu s'affiche, RETURN rend CP/A avec son écran, qui répond ensuite. Le
+contournement du port pour F8 est retiré.
 
-1. Appui (`loci_action_install_irq_trap`, `src/io/loci_glue.c`) : le vecteur
-   IRQ est détourné dans `memory.rom[0x3FFE]`, invisible quand la ROM est
-   désactivée ; le piège `$03BA` n'est jamais pris.
-2. Relâchement (`loci_action_release_irq_trap`) : `loci_rom_swap_cb` charge
-   le menu dans `memory.rom`, encore caché, puis `cpu_reset` lit le vecteur de
-   reset dans `upper_ram` : c'est celui de CP/A.
-3. `loci_menu_active` passe pourtant à `true` : tout F8 suivant est ignoré
-   jusqu'au prochain `MIA_BOOT`.
-
-Sur la vraie cartouche, LOCI reprend le bus et sert sa ROM quel que soit
-l'état du Microdisc.
-
-## Correction proposée
-
-Dans `loci_action_release_irq_trap`, avant `loci_rom_swap_cb` vers le menu :
-
-```c
-emu->memory.basic_rom_disabled = false;
-emu->memory.overlay_active = false;
-```
-
-La reprise de session (RETURN dans le menu) restaure ces deux indicateurs par
-`savestate_load`, donc CP/A retrouve sa RAM. Le piège IRQ de l'appui a le même
-défaut (vecteur écrit dans la ROM cachée), sans conséquence ici puisque le
-relâchement fait le reste.
-
-## Contournement dans le port
-
-En attendant, `oric_machine_loci_button` (`oric_machine.c`) remet ces deux
-indicateurs à `false` juste avant `loci_action_button_release`, quand le
-relâchement va ouvrir le menu.
-
-## Second point : RETURN (reprendre la session) n'est jamais possible
-
-Dans le menu, RETURN appelle `boot(true)` (`src/main.c` de loci-rom, identique
-en v0.3.0 et sur la branche principale), qui ne fait rien si
-`return_possible` est faux. Ce drapeau vient de `mia_restore_buffer_ok`
-(`src/libsrc/restore.s`) : il lit l'octet `RSTR_LAST` ($3F0E) de la XRAM de
-LOCI et attend `'L'`, écrit par `mia_save_state`, la routine que la ROM du
-menu exécute après le piège du bouton Action. La reprise se fait ensuite par
-`mia_restore_state`, depuis cette XRAM.
-
-Phosphoric saute cette routine (le relâchement va droit au menu par le
-vecteur de reset) et prévoit sa propre reprise, `MIA_BOOT` avec
-`LOCI_BOOT_RESUME` (0x40) et `loci_resume_session_cb` ; mais la ROM 0.3.0 ne
-pose jamais ce bit (`mia_set_ax(0x80 | ...)`). D'après le code, l'octet `'L'`
-n'est donc jamais présent : l'entrée RETURN reste inactive et l'instantané
-`loci_resume.ost` ne sert pas. Au premier démarrage, c'est normal aussi sur la
-vraie cartouche (aucune session à reprendre).
-
-## Troisième point : l'ACIA de LOCI perd des octets (console à distance de CP/A)
+## 1. L'ACIA de LOCI perd des octets (console à distance de CP/A)
 
 Reproduit avec Phosphoric natif (Linux), sans le port : `--loci --serial
 picowifi:x`, CP/A (`cpa.dsk`) puis `REMOTE 127.0.0.1:2325` vers `remote.py
@@ -93,7 +48,7 @@ perte.
 Contournement dans le port : `oric_machine_init` passe `--serial-buffer 256`
 et active la contre-pression avec le modem.
 
-## Quatrième point : l'ACIA de LOCI est cadencée comme une vraie 6551
+## 2. L'ACIA de LOCI est cadencée comme une vraie 6551
 
 Phosphoric cadence l'ACIA sur le débit de son registre de contrôle : à 9600
 bauds, ~1040 cycles par octet reçu et ~1180 par octet envoyé. Le vrai LOCI
@@ -113,7 +68,7 @@ Contournement dans le port : `acia_write` détourné par l'éditeur de liens
 (`--wrap`) ; après chaque écriture, `rx_reload` et `tx_reload` sont remis à 1
 (`oric_machine.c`). `modemcadence=1` rend la cadence de Phosphoric.
 
-## Cinquième point : les disquettes de LOCI ne sont jamais réécrites
+## 3. Les disquettes de LOCI ne sont jamais réécrites
 
 `loci_dsk_open` (`src/io/loci_bus.c`) charge le `.dsk` en mémoire ; les
 écritures de l'Oric ne vont que dans cette copie. `loci_dsk_flush` ne la
@@ -131,7 +86,7 @@ Contournement dans le port (`disquette.c`) : 2 s après la dernière écriture
 pistes qui diffèrent du fichier sont réinjectées (copie de
 `mfm_inject_track`) et réécrites sur place.
 
-## Sixième point : pas de montage d'une disquette de LOCI au démarrage
+## 4. Pas de montage d'une disquette de LOCI au démarrage
 
 Pour démarrer sur une disquette avec LOCI, il faut passer par le menu à
 chaque fois (choisir l'image, puis Échap). Une option du genre

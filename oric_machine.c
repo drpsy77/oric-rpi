@@ -150,16 +150,31 @@ static void io_write_callback(uint16_t address, uint8_t value, void* userdata) {
         cassette_set_motor(&emu->cassette, on);
     }
 
-    /* Capture old PCR before VIA write (for printer strobe edge detection) */
-    uint8_t old_pcr = emu->via.pcr;
+    /* Centronics STROBE = PB4 (2.31.4): its output level before the write.
+     * A port B pin not set as output floats high. */
+    const bool pb4_before = !(emu->via.ddrb & PRINTER_STROBE_PB4) ||
+                            (emu->via.orb & PRINTER_STROBE_PB4);
 
     via_write(&emu->via, reg, value);
+
+    /* ORB writes only: the ROM's reset code turns PB4 into an output
+     * (DDRB = $F7 with ORB = 0), then sets ORB = $B7. Electrically PB4 dips
+     * low then high, a real printer would get a NUL; taking it would put a
+     * stray $00 at the start of every capture file. */
+    if (reg == VIA_ORB) {
+        const bool pb4_after = !(emu->via.ddrb & PRINTER_STROBE_PB4) ||
+                               (emu->via.orb & PRINTER_STROBE_PB4);
+        if (oric_printer_check_pb4(&emu->printer, pb4_before, pb4_after, emu->via.ora)) {
+            /* Byte taken: the printer answers with an ACK pulse on CA1,
+             * which the ROM print loop waits for (IFR bit 1). */
+            via_set_ca1(&emu->via, false);
+            via_set_ca1(&emu->via, true);
+        }
+    }
 
     /* Decode PSG bus state ONLY when control lines change (PCR writes). */
     if (reg == VIA_PCR) {
         psg_decode(emu);
-        /* Check for Centronics printer STROBE (CA2 forced low → high) */
-        oric_printer_check_strobe(&emu->printer, old_pcr, value, emu->via.ora);
     }
 }
 
@@ -394,7 +409,7 @@ bool oric_machine_init(const oric_media_t* media) {
              * écrase l'octet non lu (OVERRUN) et le pilote de CP/A, qui
              * scrute l'ACIA, perd la moitié de chaque demande de la console
              * à distance. Le vrai LOCI ne prend au modem que ce que l'Oric
-             * a lu (docs/phosphoric-f8.md, troisième point). */
+             * a lu (docs/phosphoric-f8.md, point 1). */
             if (strcmp(opts[i].name, "serial-buffer") == 0)
                 card_modules_set_option(cfg.card_cfg, opts[i].val, "256");
         }
@@ -474,7 +489,7 @@ void oric_machine_nmi(void) {
 }
 
 /* main.c sdl_function_key (SDLK_F8) et SDL_KEYUP : bouton Action de LOCI.
- * Appui = instantané de session + piège IRQ ; relâchement = menu LOCI. */
+ * Appui = piège IRQ ; relâchement = menu LOCI (RETURN reprend la session). */
 void oric_machine_loci_button(bool down) {
     emulator_t* emu = &s_emu;
     if (!emu->card_on[CARD_IDX_loci]) return;
@@ -482,15 +497,6 @@ void oric_machine_loci_button(bool down) {
         loci_action_button_short(&emu->loci);
     } else {
         emu->loci_button_long = false;     /* [port] appui long (ROM de diagnostic) non repris */
-        /* [port] Contournement (docs/phosphoric-f8.md) : si un programme a
-         * remplacé la ROM par la RAM ($C000-$FFFF, ROMDIS du Microdisc,
-         * cas de CP/A), le menu chargé dans la ROM resterait caché et le
-         * 6502 redémarrerait dans cette RAM. La vraie cartouche reprend la
-         * main sur le bus : on rend la ROM visible avant le relâchement. */
-        if (emu->loci.action_active && !emu->loci_menu_active) {
-            emu->memory.basic_rom_disabled = false;
-            emu->memory.overlay_active = false;
-        }
         loci_action_button_release(&emu->loci);
     }
 }

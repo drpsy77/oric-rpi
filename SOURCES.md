@@ -8,7 +8,7 @@ n'ajoute que le strict nécessaire pour le faire tourner sous Circle.
 
 | Composant | Origine | Licence | Dossier ici | Modifié ? |
 |---|---|---|---|---|
-| Phosphoric — cœur de l'émulateur Oric-1/Atmos | <https://github.com/benedictemarty/Phosphoric>, commit dans `phosphoric/COMMIT` (validé sur `675cb06`, 2026-10-05, v2.30.0) — © 2026 bmarty | EUPL-1.2 (`phosphoric/LICENSE`) | `phosphoric/` | **Non** (copie à l'identique par `importer_phosphoric.sh`) |
+| Phosphoric — cœur de l'émulateur Oric-1/Atmos | <https://github.com/benedictemarty/Phosphoric>, commit dans `phosphoric/COMMIT` (validé sur `acfeacc`, 2026-11-01, v2.31.15) — © 2026 bmarty | EUPL-1.2 (`phosphoric/LICENSE`) | `phosphoric/` | **Non** (copie à l'identique par `importer_phosphoric.sh`) |
 | Circle — environnement bare-metal C++ pour Raspberry Pi | <https://github.com/rsta2/circle> — © R. Stange | GPL-3.0 | dépendance externe | Non |
 | circle-stdlib — newlib (libc) au-dessus de Circle, `fopen` sur la carte SD | <https://github.com/smuehlst/circle-stdlib> — © S. Mühlstrasser | GPL-3.0 | dépendance externe | Non |
 | ROM du menu LOCI v0.3.0 (`locirom`) | <https://github.com/sodiumlb/loci-rom>, livrée par Phosphoric dans `roms/loci/` (notice copiée avec) — © 2024 Sodiumlightbaby | BSD-3-Clause | `phosphoric/roms/loci/` | Non |

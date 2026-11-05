@@ -14,7 +14,8 @@
 #   <port>/phosphoric/COMMIT        commit Git d'origine (traçabilité)
 #
 # Liste établie par fermeture des dépendances à l'édition de liens sur
-# Phosphoric 675cb06 (2026-10-05), LOCI compris. Si ton clone est plus
+# Phosphoric 675cb06 (2026-10-05), LOCI compris ; inchangée pour acfeacc
+# (2.31.15, 2026-11-01). Si ton clone est plus
 # récent et qu'un fichier manque, le script s'arrête et le signale.
 set -eu
 

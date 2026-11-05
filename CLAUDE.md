@@ -12,7 +12,9 @@ Contexte pour Claude Code. Échanges en français.
 - Si une modification de Phosphoric devient nécessaire : la proposer et la
   documenter (idéalement en amont, auprès de bmarty), jamais en silence.
   Un contournement côté port est permis s'il est marqué `[port]` et décrit
-  (exemple : `docs/phosphoric-f8.md`).
+  (exemple : `docs/phosphoric-f8.md`). À chaque nouvelle version de
+  Phosphoric : comparer les fonctions de `main.c` reprises dans
+  `oric_machine.c` (`git diff` des deux commits) et revoir les contournements.
 - Licence du dépôt : EUPL-1.2 (`LICENSE`).
 - Ne jamais coder sans l'accord de Pierre quand il pose une question.
 - Les essais sur la Pi sont faits par Pierre (carte SD déplacée à la main) :
@@ -33,7 +35,7 @@ abandonné (un cœur, trop lent avec LOCI, gel).
 
 ```
 /home/pi/Projets/circle-stdlib   clone neuf, ./configure -r 3 -o ARM_ALLOW_MULTI_CORE
-/home/pi/Projets/phosphoric      clone, commit validé 675cb06
+/home/pi/Projets/phosphoric      clone, commit validé acfeacc (2.31.15)
 /home/pi/Projets/oric-rpi        ce dépôt
 /home/pi/Projets/cpa-oric        CP/A, console à distance (remote.py, vitrine)
 ```
@@ -97,7 +99,7 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 
 Fichiers écrits par le noyau : `oric/journal.txt` (journal de Phosphoric,
 session précédente dans `journal-precedent.txt`), `oric/perf.txt` (F12, une
-mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
+mesure ajoutée par appui),
 `oric/loci/picowifi.cfg` (AT&W du modem).
 
 ## Fichiers du port
@@ -192,13 +194,19 @@ mesure ajoutée par appui), `oric/loci/loci_resume.ost` (F8),
   Leçons) ; relais : tampon de 1600 octets par socket (Circle rend un segment
   entier par lecture) ; `[port]` dans `oric_machine_init` : `--serial-buffer
   256` et contre-pression de l'ACIA (`acia_set_rx_backpressure`).
-- Défauts de Phosphoric dans `docs/phosphoric-f8.md` (à envoyer à bmarty) :
-  F8 sous CP/A (contourné) ; Entrée du menu (reprise de session) jamais
-  possible ; ACIA de LOCI qui écrase les octets non lus (contourné).
+- Phosphoric passé de 2.30.0 (675cb06) à 2.31.15 (acfeacc), 05/11/2026 :
+  F8 sous CP/A et Entrée du menu (reprise de session) corrigés en amont
+  (2.31.6), vérifiés sur le banc natif (CP/A, `--control`, `loci-button`) ;
+  contournement F8 du port retiré ; `loci_resume.ost` n'est plus écrit ;
+  imprimante : STROBE sur PB4 (2.31.4) reporté dans `oric_machine.c`.
+- Défauts de Phosphoric restant dans `docs/phosphoric-f8.md` (à envoyer à
+  bmarty) : ACIA de LOCI qui écrase les octets non lus (contourné), ACIA
+  cadencée (contourné), disquettes non réécrites (contourné), pas de
+  montage au démarrage (`locidisk`).
 - Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
   MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
   pistes changées réécrites sur place 2 s après la dernière écriture (banc
-  natif : identique à `sedoric_save`). À essayer sur la 3B+ (5ᵉ point de
+  natif : identique à `sedoric_save`). À essayer sur la 3B+ (3ᵉ point de
   `docs/phosphoric-f8.md`).
 
 ## Banc d'essai natif (sans la Pi)
@@ -224,6 +232,9 @@ python3 tools/remote.py --demon http://localhost:8041 coller texte.txt    # pend
 - `trace.txt` : chaque octet, et « OVERRUN » si un octet est écrasé.
 - Le démon de test sur 2325/8041 ne gêne pas celui de Pierre (2324/8040).
   Ne pas lancer `remote.py serve --help` : il démarre un démon.
+- Bouton Action sans fenêtre : `--control` (commandes `continue`, `pause`,
+  `keys DIR\n`, `loci-button`, `read BB80 460` pour l'écran texte) ;
+  `--loci-menu-at` ne sert qu'avec le vrai firmware (co-simulation).
 - La contre-pression et le transfert sans cadence n'ont pas d'option :
   essais faits en ajoutant dans la copie de Phosphoric un test de variable
   d'environnement (`card_acia.c` après `acia_set_backend` ; `acia6551.c`
@@ -241,7 +252,7 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    (collage de 980 caractères, contre-pression) : écran complet 5,6 s → 1,9 s,
    police 5,4 s → 2,3 s, écran après collage 3,4 s → 0,6 s, aucune perte.
    **Fait (05/11/2026), à essayer sur la 3B+** : `[port]` par `--wrap` de
-   `acia_write` (`oric_machine.c`), option `modemcadence=1` ; 4ᵉ point de
+   `acia_write` (`oric_machine.c`), option `modemcadence=1` ; 2ᵉ point de
    `docs/phosphoric-f8.md`.
 2. **Lecture anticipée par le cœur 0**, indispensable avec le point 1 : sans
    cadence, l'ACIA interroge le modem toutes les 32 cycles (`poll` relayé :

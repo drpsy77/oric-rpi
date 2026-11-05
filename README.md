@@ -33,9 +33,9 @@ STDLIB=$PWD
 (cd libs/circle/addon/wlan && ./makeall --nosample clean && \
  EXTRAINCLUDE="-isystem $STDLIB/install/arm-none-circle/include" ./makeall --nosample)
 
-# 2. cloner Phosphoric (version validée : 675cb06)
+# 2. cloner Phosphoric (version validée : acfeacc, 2.31.15)
 git clone https://github.com/benedictemarty/Phosphoric.git phosphoric
-cd phosphoric && git checkout 675cb06 && cd ..
+cd phosphoric && git checkout acfeacc && cd ..
 
 # 3. importer ses sources dans ce dépôt (crée le dossier phosphoric/)
 cd <ce dépôt>
@@ -81,8 +81,8 @@ défaut `real`, vitesse du vrai lecteur).
 LOCI : `loci=1`, et **pas** de `rom=` : la ROM système est alors le menu
 (`oric/loci/locirom`). `lociflash=` et `lociusb=` changent les deux
 dossiers. Menu : flèches, Espace pour ouvrir/choisir, Échap pour démarrer
-l'Oric. Entrée (reprendre la session interrompue par F8) ne marche pas
-encore : limite de Phosphoric, voir `docs/phosphoric-f8.md`.
+l'Oric, Entrée pour reprendre la session interrompue par F8 (depuis
+Phosphoric 2.31.6).
 
 Modem Wi-Fi de LOCI : `modem=1`. L'Oric voit le modem picowifi en `$0380`
 (commandes AT, `ATDT-hôte:port`), comme avec un Pico W branché sur le vrai
