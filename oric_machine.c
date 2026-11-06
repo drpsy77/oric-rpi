@@ -362,6 +362,75 @@ void __wrap_acia_write(acia6551_t* acia, uint16_t addr, uint8_t value) {
 /* ── Instance unique de la machine (main() : « emulator_t emu; ») ─────── */
 static emulator_t s_emu;                   /* ~2,7 Mo : hors pile */
 
+/* ── [port] +++ du modem reconnu comme par un modem Hayes (ajout du port) ─ */
+/* Le picowifi de Phosphoric (picowifi_send) ne prend un « + » pour
+ * l'échappement que si son compteur de silence atteint 50 depuis l'octet
+ * envoyé précédent. Or ce compteur avance dans picowifi_recv, que l'ACIA
+ * n'appelle que lorsqu'un octet est arrivé : il compte des octets reçus, pas
+ * du temps. Ligne calme, « +++ » envoyé d'affilée (REMOTE OFF de CP/A) :
+ * jamais reconnu, le modem reste en ligne et l'AT suivant part vers l'hôte
+ * (« No answer from the modem »). Le vrai Pico W reconnaît « +++ » après une
+ * seconde de silence. Le port détourne send, poll et recv du modem : un « + »
+ * envoyé après une seconde sans émission (temps de l'Oric, en cycles), puis
+ * les deux suivants rapprochés, sont précédés d'appels à recv qui donnent au
+ * modem le silence attendu ; les octets que ces appels retirent du modem sont
+ * gardés dans une file et rendus à l'ACIA avant les autres. Signalé à bmarty
+ * (docs/phosphoric-f8.md, point 5). */
+#define ESC_GUARD_CYCLES  1000000          /* 1 s (S12 = 50, en 1/50 s) */
+#define ESC_SILENCE       50               /* seuil de picowifi_send */
+
+static bool (*s_modem_send)(serial_backend_t*, uint8_t);
+static bool (*s_modem_recv)(serial_backend_t*, uint8_t*);
+static bool (*s_modem_poll)(serial_backend_t*);
+static uint64_t s_esc_last_tx;             /* cycle du dernier octet envoyé */
+static int s_esc_plus;                     /* « + » de l'échappement en cours */
+static uint8_t s_esc_held[256];            /* octets retirés au modem */
+static unsigned s_esc_in, s_esc_out;
+
+static void esc_give_silence(serial_backend_t* self) {
+    for (int i = 0; i < ESC_SILENCE; i++) {
+        uint8_t byte;
+        if (s_esc_in - s_esc_out >= sizeof s_esc_held) break;
+        if (s_modem_recv(self, &byte))
+            s_esc_held[s_esc_in++ % sizeof s_esc_held] = byte;
+    }
+}
+
+static bool esc_send(serial_backend_t* self, uint8_t byte) {
+    uint64_t now = s_emu.cpu.cycles;
+    bool quiet = now - s_esc_last_tx >= ESC_GUARD_CYCLES;
+    if (byte == '+' && (s_esc_plus == 0 ? quiet : s_esc_plus < 3 && !quiet)) {
+        s_esc_plus++;
+        esc_give_silence(self);
+    } else {
+        s_esc_plus = 0;
+    }
+    s_esc_last_tx = now;
+    return s_modem_send(self, byte);
+}
+
+static bool esc_poll(serial_backend_t* self) {
+    return s_esc_in != s_esc_out || (s_modem_poll && s_modem_poll(self));
+}
+
+static bool esc_recv(serial_backend_t* self, uint8_t* byte) {
+    if (s_esc_in != s_esc_out) {
+        *byte = s_esc_held[s_esc_out++ % sizeof s_esc_held];
+        return true;
+    }
+    return s_modem_recv(self, byte);
+}
+
+static void esc_hook(serial_backend_t* modem) {
+    if (!modem || !modem->send || !modem->recv) return;
+    s_modem_send = modem->send;
+    s_modem_recv = modem->recv;
+    s_modem_poll = modem->poll;
+    modem->send = esc_send;
+    modem->recv = esc_recv;
+    modem->poll = esc_poll;
+}
+
 _Static_assert(ORIC_MAX_DRIVES == MICRODISC_MAX_DRIVES, "ORIC_MAX_DRIVES");
 
 /* ── Remplace main() + main_setup_machine/rom_model/tape/disks_speech ──── */
@@ -434,6 +503,9 @@ bool oric_machine_init(const oric_media_t* media) {
         acia_no_cadence(&emu->acia);
         log_info("ACIA: no baud-rate cadence (port, like the real LOCI)");
     }
+    /* [port] +++ après une seconde de silence (voir esc_send) */
+    if (media->serial && emu->card_on[CARD_IDX_acia])
+        esc_hook(emu->acia.backend);
 
     /* main_setup_loci */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_LOCI) != 0) return false;

@@ -160,6 +160,13 @@ mesure ajoutée par appui),
   `close` : le cœur 0 envoie le reste puis ferme.
 - ACIA sans cadence : `[port]` dans `oric_machine.c`, `acia_write` détourné
   (`--wrap`) ; `rx_reload`/`tx_reload` remis à 1 après chaque écriture.
+- `+++` du modem : `[port]` `esc_send` dans `oric_machine.c` (`send`, `poll`,
+  `recv` du backend remplacés). Le picowifi compte son silence en appels de
+  `recv`, que l'ACIA ne fait que si un octet est arrivé : `+++` de `REMOTE
+  OFF` jamais reconnu. Un « + » après 1 s sans émission (cycles), puis deux
+  autres à moins de 1 s, reçoivent 50 appels de `recv` (octets gardés et
+  rendus avant les autres). Vérifié sur le banc natif (copie de Phosphoric,
+  même code sous `PORT_ESC`) : REMOTE, REMOTE OFF (hangup), REMOTE.
 - Sockets de circle-newlib : pas de `O_NONBLOCK` (fcntl → ENOSYS) ; le relais
   le mémorise et lit par `recv(MSG_DONTWAIT)`. DNS : pas de noms `.local`.
 - Écran : `config.txt` propose des blocs (A mode préféré actif, 60 Hz natif de l'écran de Pierre ; B 720p50,
@@ -224,7 +231,8 @@ mesure ajoutée par appui),
 - Défauts de Phosphoric restant dans `docs/phosphoric-f8.md` (à envoyer à
   bmarty) : ACIA de LOCI qui écrase les octets non lus (contourné), ACIA
   cadencée (contourné), disquettes non réécrites (contourné), pas de
-  montage au démarrage (`locidisk`).
+  montage au démarrage (`locidisk`), `+++` non reconnu sur une ligne calme
+  (contourné).
 - Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
   MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
   pistes changées réécrites sur place 2 s après la dernière écriture (banc

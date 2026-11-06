@@ -1,9 +1,10 @@
-# Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage
+# Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage, +++ du modem
 
 À envoyer à bmarty. Constaté sur le port Circle (Pi 3B+) et sur Phosphoric
-natif (Linux) ; les quatre points sont revus sur **Phosphoric 2.31.15**
+natif (Linux) ; les cinq points sont revus sur **Phosphoric 2.31.15**
 (commit `acfeacc`) : `acia6551.c`, `card_acia.c`, `loci_bus.c` et
-`sedoric.c` n'ont pas changé depuis 2.30.0, où ils ont été observés.
+`sedoric.c` n'ont pas changé depuis 2.30.0, où ils ont été observés ; le
+point 5 est observé sur 2.31.15.
 
 ## Déjà corrigé en 2.31.6 (merci)
 
@@ -93,3 +94,29 @@ chaque fois (choisir l'image, puis Échap). Une option du genre
 `--loci-mount A:0:/cpa.dsk` (montage, configuration du menu en XRAM, puis
 `MIA_BOOT` avec `LOCI_BOOT_FDC`) éviterait le menu. Le port le fait dans
 `locidisk.c` avec `resolve_path`, `loci_dsk_open` et `loci_rom_swap_cb`.
+
+## 5. Le picowifi ne reconnaît pas « +++ » sur une ligne calme
+
+`picowifi_send` (`src/io/serial_picowifi.c`) ne prend un « + » pour
+l'échappement que si `pw->silence >= 50`, remis à 0 à chaque octet envoyé.
+Or `pw->silence` n'avance que dans `picowifi_recv`, et l'ACIA
+(`acia6551.c`, chemin RX) n'appelle `recv` que si `poll` a vu un octet
+arrivé : le compteur compte des octets reçus, pas du temps. Sur une ligne
+calme, et avec trois « + » envoyés d'affilée (comme le fait tout logiciel
+de communication), « +++ » n'est jamais reconnu : le modem reste en ligne,
+`ATH0` part vers l'hôte, et la commande suivante (`AT`) ne reçoit pas de
+réponse. Le vrai Pico W (comme un modem Hayes) demande une seconde de
+silence avant le premier « + », pas entre les « + ».
+
+Reproduit en natif avec CP/A : `REMOTE 127.0.0.1:2325`, puis `REMOTE OFF`
+(une seconde de silence, `+++`, une seconde, `ATH0`), puis `REMOTE` de
+nouveau : « No answer from the modem », et ni « +++ escape » ni « hangup »
+dans le journal. Proposition : mesurer la garde en temps (cycles émulés),
+avant le premier « + » et entre les « + » (S12), plutôt qu'en appels de
+`recv`.
+
+Contournement dans le port (`oric_machine.c`, `esc_send`) : `send`, `poll`
+et `recv` du modem détournés ; un « + » envoyé après une seconde sans
+émission (en cycles), puis les deux suivants à moins d'une seconde, sont
+précédés de 50 appels à `recv`, dont les octets éventuels sont gardés et
+rendus à l'ACIA avant les autres.
