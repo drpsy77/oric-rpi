@@ -86,7 +86,13 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   pour la cadence de Phosphoric, 9600 bauds). Avec le modem, il est « 1: » et
   la clé devient « 2: » (sans lui, la clé est « 1: ») : « 0: » est le seul
   repère fixe.
-- `locidisk=0:/cpa.dsk` (avec `loci=1`) : image en A: de LOCI, démarrage
+- Heure (avec le modem seulement) : NTP (`ntp=pool.ntp.org`) dès que le
+  Wi-Fi a son adresse ; `fuseau=` règle POSIX de `TZ` (défaut
+  `CET-1CEST,M3.5.0,M10.5.0/3`). `UpdateClock` (cœur 0, chaque seconde)
+  applique le décalage à `CTimer` (il garde l'heure locale : `SetTimeZone`
+  puis `SetTime` UTC), dont la FatFs date les fichiers ; « Heure : ... »
+  dans le journal à chaque changement.
+- `locidisk=0:/cpa-en.dsk` (avec `loci=1`) : image en A: de LOCI, démarrage
   direct sans le menu ; F8 montre le menu avec A: rempli. Essayé sur le banc
   natif (CP/A démarre, `USBMOUNT` voit A:, `USBMOUNT C: x.DSK` depuis la clé
   marche). `USBMOUNT` refuse les images de 0: (le vrai LOCI s'y est figé) :
@@ -199,6 +205,13 @@ mesure ajoutée par appui),
   11 min : 5272 trames, aucune refusée, collages de la vitrine (1024 touches)
   sans perte. Le DNS de Circle ne connaît pas les noms de la box : le nom doit
   être dans `HOSTS` de la disquette (Pierre le tient hors de Git).
+- Rappel automatique de REMOTE (cpa-oric 359f59c) : session de 3 h 36 sur la
+  3B+, liaison tombée, l'Oric a rappelé mais plus rien n'est passé. Défaut de
+  CP/A (`sr_rap` jetait le CONNECT immédiat de Phosphoric), corrigé dans
+  `src/serial.s` le 06/11/2026, vérifié sur le banc natif (démon relancé :
+  rappel, 269 trames, aucune refusée). Le message `setsockopt(6, 1) is
+  unimplemented` (TCP_NODELAY) est sans effet. Cause de la coupure non
+  trouvée (chaque côté a vu la fermeture venir de l'autre).
 - Corrections qui l'ont permis : pilote Wi-Fi recompilé (`jmp_buf`, voir
   Leçons) ; relais : tampon de 1600 octets par socket (Circle rend un segment
   entier par lecture) ; `[port]` dans `oric_machine_init` : `--serial-buffer
@@ -221,7 +234,7 @@ mesure ajoutée par appui),
 ## Banc d'essai natif (sans la Pi)
 
 Phosphoric compilé pour Linux (`make -j4` dans une **copie** de
-`/home/pi/Projets/phosphoric`, binaire `oric1-emu`), même `cpa.dsk`,
+`/home/pi/Projets/phosphoric`, binaire `oric1-emu`), même `cpa-en.dsk` (copiée en `cpa.dsk`),
 `basic11b.rom`, `microdis.rom` (copiés depuis la carte, `oric/loci/`) :
 
 ```

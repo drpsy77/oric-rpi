@@ -32,8 +32,12 @@
 //                                 wpa_supplicant.conf à la racine de la carte
 //   modemcadence=1                ACIA du modem cadencée sur son débit (9600
 //                                 bauds) ; défaut 0 : sans cadence, comme LOCI
-//   locidisk=0:/cpa.dsk           avec loci=1 : image montée en A: de LOCI et
+//   locidisk=0:/cpa-en.dsk        avec loci=1 : image montée en A: de LOCI et
 //                                 démarrage direct dessus (sans le menu)
+//   ntp=pool.ntp.org              avec modem=1 : serveur de l'heure (dates
+//                                 des fichiers écrits sur la carte SD)
+//   fuseau=CET-1CEST,M3.5.0,M10.5.0/3  fuseau horaire, règle POSIX de TZ
+//                                 (défaut : Paris, heure d'été comprise)
 // Ces réglages (sauf width, height, lociflash) peuvent aussi être mis dans
 // oric.cfg du dossier lociflash (0:ORIC.CFG pour l'Oric), qui l'emporte.
 // Journal de Phosphoric : oric/journal.txt (session précédente :
@@ -58,6 +62,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define FRAME_US        ORIC_FRAME_US               // une trame PAL Oric = 20 ms
 #define MAX_SAMPLES     1024                        // > 882 (44,1 kHz / 50)
@@ -95,6 +100,9 @@ CKernel::CKernel (void)
 	m_PanicScreen (&mScreen),
 	m_bModem (false),
 	m_bNetStarting (false),
+	m_pNTPDaemon (0),
+	m_nClockCheck (0),
+	m_bClockSet (false),
 	m_pKeyboard (0),
 	m_pSound (0),
 	m_bAzerty (false),
@@ -294,6 +302,58 @@ void CKernel::UpdateNetwork (void)
 	CString IPAddress;
 	mNet.GetConfig ()->GetIPAddress ()->Format (&IPAddress);
 	JournalPrintf ("Wi-Fi : connecte, adresse %s\n", (const char *) IPAddress);
+
+	// Heure par NTP : une tâche du cœur 0, nouvel essai toutes les 5 min
+	// tant que le serveur ne répond pas, puis toutes les 15 min
+	m_pNTPDaemon = new CNTPDaemon (Option ("ntp", "pool.ntp.org"), &mNet);
+}
+
+// Cœur 0, à chaque tour : une fois l'heure reçue (NTP, en temps universel),
+// décalage du fuseau (fuseau=, heure d'été comprise) recalculé chaque
+// seconde et appliqué à l'horloge de Circle, dont la FatFs date les
+// fichiers. circle-newlib (time, localtime de Phosphoric) suit TZ.
+void CKernel::UpdateClock (void)
+{
+	unsigned nNow = CTimer::GetClockTicks ();
+	if (nNow - m_nClockCheck < 1000000)
+	{
+		return;
+	}
+	m_nClockCheck = nNow;
+
+	CTimer *pTimer = CTimer::Get ();
+	time_t nUTC = pTimer->GetUniversalTime ();
+	if (nUTC < 1600000000)		// pas encore d'heure (avant 2020)
+	{
+		return;
+	}
+
+	struct tm Local;
+	if (localtime_r (&nUTC, &Local) == 0)
+	{
+		return;
+	}
+	// Heure locale en secondes depuis 1970 (jours depuis le 1er janvier 1970
+	// du calendrier civil : H. Hinnant, « days_from_civil »)
+	int y = Local.tm_year + 1900 - (Local.tm_mon < 2);
+	int era = y / 400;
+	int yoe = y - era * 400;
+	int doy = (153 * (Local.tm_mon + (Local.tm_mon < 2 ? 10 : -2)) + 2) / 5 + Local.tm_mday - 1;
+	int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+	long long nLocal = (long long) (era * 146097 + doe - 719468) * 86400
+			   + Local.tm_hour * 3600 + Local.tm_min * 60 + Local.tm_sec;
+	int nMinutes = (int) ((nLocal - nUTC) / 60);
+
+	if (nMinutes != pTimer->GetTimeZone () || !m_bClockSet)
+	{
+		// L'horloge de Circle garde l'heure locale : la reposer avec le fuseau
+		pTimer->SetTimeZone (nMinutes);
+		pTimer->SetTime ((unsigned) nUTC, FALSE);
+		m_bClockSet = true;
+		JournalPrintf ("Heure : %04d-%02d-%02d %02d:%02d:%02d (UTC%+d min)\n",
+			       Local.tm_year + 1900, Local.tm_mon + 1, Local.tm_mday,
+			       Local.tm_hour, Local.tm_min, Local.tm_sec, nMinutes);
+	}
 }
 
 // Cœur 0 : préparation, puis clavier USB, son, température, carte SD.
@@ -319,6 +379,10 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			JournalPrintf ("  %s=%s\n", s_pSettingName[i], s_pSettingValue[i]);
 		}
 	}
+
+	// Fuseau horaire (règle POSIX de TZ), avant que le cœur 1 ne démarre
+	setenv ("TZ", Option ("fuseau", "CET-1CEST,M3.5.0,M10.5.0/3"), 1);
+	tzset ();
 
 	if (m_bModem && !m_bNetStarting)
 	{
@@ -394,6 +458,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		mScheduler.Yield ();		// pile réseau, Wi-Fi
 		NetRelayService ();		// sockets et fermetures demandés par le cœur 1
 		UpdateNetwork ();
+		UpdateClock ();
 		UpdateKeyboard ();
 		m_CPUThrottle.Update ();	// surveille la température (toutes les 2 à 5 s)
 

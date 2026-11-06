@@ -12,6 +12,7 @@
 #include <circle/sound/soundbasedevice.h>
 #include <circle/cputhrottle.h>
 #include <circle/multicore.h>
+#include <circle/net/ntpdaemon.h>
 
 class CKernel;
 
@@ -58,6 +59,7 @@ private:
 	void ApplyRequests (void);
 	void SetupDisplay (void);
 	void UpdateNetwork (void);
+	void UpdateClock (void);
 	void Blit (void);
 	void WritePerf (void);
 	void LogToJournal (void);
@@ -83,6 +85,12 @@ private:
 	// Modem Wi-Fi (modem=1) : réseau démarré sans attendre la connexion
 	bool m_bModem;
 	bool m_bNetStarting;
+
+	// Heure : NTP dès que le Wi-Fi est prêt (ntp=), fuseau de fuseau= appliqué
+	// à l'horloge de Circle (dates des fichiers de la carte SD)
+	CNTPDaemon *m_pNTPDaemon;
+	unsigned m_nClockCheck;				// dernier contrôle du fuseau
+	bool m_bClockSet;
 
 	CUSBKeyboardDevice * volatile m_pKeyboard;
 	CSoundBaseDevice *m_pSound;

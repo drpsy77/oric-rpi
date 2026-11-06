@@ -94,7 +94,14 @@ L'adresse obtenue est notée dans `oric/journal.txt`. L'ACIA du modem n'est
 pas cadencée (comme sur le vrai LOCI) ; `modemcadence=1` rend la cadence de
 Phosphoric (9600 bauds).
 
-Démarrage direct sur une disquette, sans le menu : `locidisk=0:/cpa.dsk`
+Heure : avec le modem, la Pi la prend par NTP dès que le Wi-Fi a son adresse
+(`ntp=pool.ntp.org`, nouvel essai toutes les 5 min sans réponse). Les
+fichiers écrits sur la carte (disquettes, journal) sont alors datés, et le
+journal le note. Fuseau : `fuseau=` (règle POSIX de `TZ`, défaut
+`CET-1CEST,M3.5.0,M10.5.0/3`, Paris avec l'heure d'été). Sans modem, pas
+d'heure (dates de 1980).
+
+Démarrage direct sur une disquette, sans le menu : `locidisk=0:/cpa-en.dsk`
 (avec `loci=1`), l'image étant dans `oric/loci/`. Elle est en A: de LOCI ; F8
 montre le menu avec A: rempli, `USBMOUNT` monte les autres depuis la clé.
 
