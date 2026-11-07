@@ -48,6 +48,10 @@ est la copie de travail de la carte. La carte SD de la 3B+, branchée sur la
 RPI 400 par un lecteur USB, apparaît en `/dev/sda1` (étiquette ORIC) ; la
 monter par `udisksctl mount -b /dev/sda1` (→ `/media/pi/ORIC`), la démonter
 par `udisksctl unmount -b /dev/sda1` avant que Pierre la retire.
+Disquettes de CP/A (et noyau avec `--noyau`) : `sh installer_carte.sh`
+(copie dans `oric/`, `oric/usb/` et `oric/loci/`, dont le `cpa-en.dsk` est
+le A: de `locidisk` ; anciennes images de `oric/loci/` dans
+`oric/loci/ancien/` ; démonte la carte).
 
 **Après chaque `make` de circle-stdlib**, recompiler le pilote Wi-Fi avec
 les en-têtes de circle-newlib (voir Leçons) :
