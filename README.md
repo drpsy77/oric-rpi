@@ -74,7 +74,8 @@ fois plus larges que hauts, comme sur un téléviseur PAL) ou `pixels=carres`
 téléviseur) ou `couleurs=pures`, `saturation=` et `luminosite=` (en %,
 défaut 100), une couleur imposée par `rouge=RRGGBB` (`noir`, `rouge`, `vert`,
 `jaune`, `bleu`, `magenta`, `cyan`, `blanc`),
-`keymap=FR` (AZERTY), `rom=`, `diskrom=` + `disk=` (les deux pour activer le
+`keymap=FR` (AZERTY), `clavier=oric/azerty.kma` (correspondance au format
+d'Oricutron, modèle `sdcard/azerty.kma`), `rom=`, `diskrom=` + `disk=` (les deux pour activer le
 Microdisc), `tape=`, `fdctiming=fast` (Microdisc sans délais mécaniques ; par
 défaut `real`, vitesse du vrai lecteur).
 

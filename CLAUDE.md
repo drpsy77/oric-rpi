@@ -78,7 +78,9 @@ section `[...]` ; modèle `sdcard/`), `cmdline.txt` (une ligne), `oric/`.
 Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 
 `cmdline.txt` :
-- commun : `width=590 height=448 keymap=FR` (`pixels=tele` par défaut,
+- commun : `width=590 height=448 keymap=FR` (`clavier=oric/azerty.kma` :
+  correspondance d'Oricutron, modèle `sdcard/`, remplace la table intégrée ;
+  `pixels=tele` par défaut,
   `pixels=carres` ; `couleurs=tele|pures`, `saturation=`, `luminosite=` en %,
   `rouge=RRGGBB`... pour les 8 couleurs, palette notée dans le journal) ;
 - sans LOCI : `rom=oric/basic11b.rom`, plus `diskrom=oric/microdis.rom

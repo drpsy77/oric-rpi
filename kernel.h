@@ -64,6 +64,7 @@ private:
 	void WritePerf (void);
 	void LogToJournal (void);
 	void ShowHalted (void);
+	void SetupKeyMap (void);
 
 	// Réglages : oric.cfg (dossier de lociflash=) d'abord, puis cmdline.txt
 	void ReadSettings (void);
@@ -94,7 +95,6 @@ private:
 
 	CUSBKeyboardDevice * volatile m_pKeyboard;
 	CSoundBaseDevice *m_pSound;
-	bool m_bAzerty;
 
 	// Affichage (pixels=, couleurs=...), calculé par SetupDisplay
 	unsigned m_nScaleY;				// répétition de chaque ligne
