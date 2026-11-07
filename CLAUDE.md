@@ -49,7 +49,7 @@ RPI 400 par un lecteur USB, apparaît en `/dev/sda1` (étiquette ORIC) ; la
 monter par `udisksctl mount -b /dev/sda1` (→ `/media/pi/ORIC`), la démonter
 par `udisksctl unmount -b /dev/sda1` avant que Pierre la retire.
 Disquettes de CP/A (et noyau avec `--noyau`) : `sh installer_carte.sh`
-(copie dans `oric/`, `oric/usb/` et `oric/loci/`, dont le `cpa-en.dsk` est
+(copie dans `oric/usb/` et `oric/loci/`, dont le `cpa-en.dsk` est
 le A: de `locidisk` ; anciennes images de `oric/loci/` dans
 `oric/loci/ancien/` ; démonte la carte).
 
@@ -82,7 +82,7 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   `pixels=carres` ; `couleurs=tele|pures`, `saturation=`, `luminosite=` en %,
   `rouge=RRGGBB`... pour les 8 couleurs, palette notée dans le journal) ;
 - sans LOCI : `rom=oric/basic11b.rom`, plus `diskrom=oric/microdis.rom
-  disk=oric/xxx.dsk` pour le Microdisc ;
+  disk=oric/usb/xxx.dsk` pour le Microdisc ;
 - avec LOCI : `loci=1`, **sans** `rom=` (la ROM système est le menu) ;
   `oric/loci/` = flash « 0: » (`locirom`, `basic11b.rom`, `microdis.rom`),
   `oric/usb/` = clé « 1: » (`.dsk`, `.tap`) ; le menu ne voit rien d'autre ;
