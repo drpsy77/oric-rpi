@@ -1,9 +1,9 @@
 #!/bin/sh
 # installer_carte.sh — Copie sur la carte SD (branchée sur la RPI 400 par le
-# lecteur USB) les disquettes de CP/A construites par build.sh, et le noyau
-# avec --noyau.
+# lecteur USB) le noyau (kernel8-32.img, sauf --sans-noyau) et les disquettes
+# de CP/A construites par build.sh.
 #
-# Usage : sh installer_carte.sh [--noyau] [dossier_cpa_oric]
+# Usage : sh installer_carte.sh [--sans-noyau] [dossier_cpa_oric]
 #   défaut : /home/pi/Projets/cpa-oric
 #
 # Disquettes (build/*.dsk) copiées dans :
@@ -14,11 +14,12 @@
 # Les images remplacées dans oric/loci/ (qui peuvent porter des fichiers
 # écrits sur A:) sont gardées dans oric/loci/ancien/.
 # Sans LOCI : disk=oric/usb/cpa.dsk (rien à la racine oric/).
+# oric/azerty.kma (clavier=) : copié de sdcard/ s'il manque, jamais remplacé.
 # La carte est montée si besoin, puis démontée : prête à être retirée.
 set -eu
 
-NOYAU=0
-if [ "${1:-}" = "--noyau" ]; then NOYAU=1; shift; fi
+NOYAU=1
+if [ "${1:-}" = "--sans-noyau" ]; then NOYAU=0; shift; fi
 CPA=${1:-/home/pi/Projets/cpa-oric}
 PORT=$(cd "$(dirname "$0")" && pwd)
 DEV=/dev/sda1
@@ -38,6 +39,10 @@ for d in cpa.dsk cpa-en.dsk; do
 	cp "$CPA/build/$d" "$CARTE/oric/loci/"
 done
 echo "Disquettes copiées (oric/usb/, oric/loci/)."
+if [ ! -f "$CARTE/oric/azerty.kma" ]; then
+	cp "$PORT/sdcard/azerty.kma" "$CARTE/oric/"
+	echo "oric/azerty.kma copié (modèle)."
+fi
 
 if [ $NOYAU = 1 ]; then
 	[ -f "$PORT/kernel8-32.img" ] || { echo "kernel8-32.img absent (make ?)"; exit 1; }
