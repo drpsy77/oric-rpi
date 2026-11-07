@@ -22,3 +22,6 @@ carte-sd/
 # Copie des sources de Phosphoric : régénérée par importer_phosphoric.sh
 # (voir README.md). Seuls le script et SOURCES.md sont versionnés.
 phosphoric/
+
+# Fichiers écrits sur les disquettes de la carte (installer_carte.sh)
+sauvegarde/

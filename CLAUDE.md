@@ -52,6 +52,11 @@ Noyau et disquettes de CP/A : `sh installer_carte.sh` (`--sans-noyau`)
 (copie dans `oric/usb/` et `oric/loci/`, dont le `cpa-en.dsk` est
 le A: de `locidisk` ; anciennes images de `oric/loci/` dans
 `oric/loci/ancien/` ; `oric/azerty.kma` s'il manque ; démonte la carte).
+Avant la copie, `sauvegarde_disquettes.py` met les fichiers ajoutés ou
+modifiés sur ces disquettes depuis l'installation précédente (référence :
+`sauvegarde/installe/`) dans `sauvegarde/SAUVE.DSK` (hors Git, avec
+`sauvegarde/ancien/`, les images remplacées), remise ensuite en
+`oric/usb/sauve.dsk`.
 
 **Après chaque `make` de circle-stdlib**, recompiler le pilote Wi-Fi avec
 les en-têtes de circle-newlib (voir Leçons) :
@@ -130,6 +135,7 @@ mesure ajoutée par appui),
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
 | `main.cpp` | copie circle-stdlib |
+| `installer_carte.sh`, `sauvegarde_disquettes.py` | installation sur la carte, sauvegarde des fichiers écrits sur l'Oric |
 | `Makefile`, `sdcard/`, `README.md`, `SOURCES.md`, `docs/` | |
 
 ## Points techniques
