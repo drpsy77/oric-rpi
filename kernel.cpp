@@ -17,7 +17,7 @@
 //   saturation=100 luminosite=100 couleurs plus vives / plus claires (en %)
 //   rouge=FF2A1A ...              une couleur imposée (RRGGBB) : noir, rouge,
 //                                 vert, jaune, bleu, magenta, cyan, blanc
-//   keymap=FR                     clavier AZERTY (lettres A/Q, Z/W, M, ; ,)
+//   keymap=FR                     clavier AZERTY (A/Q, Z/W, M, ; : ù * ² !)
 //   rom=oric/basic11b.rom         ROM système (défaut)
 //   diskrom=oric/microdis.rom     ROM du Microdisc  } les deux pour activer
 //   disk=oric/xxx.dsk             disquette lecteur A } le Microdisc
@@ -738,7 +738,10 @@ static const struct { unsigned char ucMask; int nCol, nRow; } s_OricMods[] =
 	{ ALT,    5, 4 }, { ALTGR,  6, 4 }, { RSHIFT, 7, 4 }	// Alt = FUNCT
 };
 
-// Clavier AZERTY (keymap=FR) : ramène les lettres déplacées à leur code QWERTY.
+// Clavier AZERTY (keymap=FR) : ramène les lettres déplacées à leur code QWERTY ;
+// signes choisis par Pierre (touche du PC -> touche de l'Oric, MAJ donnant le
+// second signe de celle-ci) : ù -> ;  * -> '  ; -> .  : -> /  ² et ! -> \ .
+// Comme keymap/azerty.kma d'Oricutron chez Pierre.
 static unsigned char AzertyToQwerty (unsigned char ucKey)
 {
 	switch (ucKey)
@@ -749,7 +752,13 @@ static unsigned char AzertyToQwerty (unsigned char ucKey)
 	case 0x1D: return 0x1A;	// touche W  -> w
 	case 0x33: return 0x10;	// touche M  -> m
 	case 0x10: return 0x36;	// touche ,  -> ,
-	case 0x36: return 0x33;	// touche ;  -> ;
+	case 0x36: return 0x37;	// touche ;  -> .
+	case 0x37: return 0x38;	// touche :  -> /
+	case 0x34: return 0x33;	// touche ù  -> ;
+	case 0x32:			// touche *  -> ' (ISO ; 0x31 sur
+	case 0x31: return 0x34;	//   certains claviers)
+	case 0x35:			// touche ²  -> antislash
+	case 0x38: return 0x31;	// touche !  -> antislash
 	default:   return ucKey;
 	}
 }
