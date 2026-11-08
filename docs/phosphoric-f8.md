@@ -1,4 +1,4 @@
-# Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage, +++ du modem
+# Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage, +++ du modem, cassette sous ROMDIS
 
 À envoyer à bmarty. Constaté sur le port Circle (Pi 3B+) et sur Phosphoric
 natif (Linux) ; les cinq points sont revus sur **Phosphoric 2.31.15**
@@ -120,3 +120,25 @@ et `recv` du modem détournés ; un « + » envoyé après une seconde sans
 émission (en cycles), puis les deux suivants à moins d'une seconde, sont
 précédés de 50 appels à `recv`, dont les octets éventuels sont gardés et
 rendus à l'ACIA avant les autres.
+
+## 6. Les interceptions de la cassette visent aussi la RAM overlay
+
+`tape_patches` (`src/io/tape_patches.c`), appelé avant chaque instruction,
+compare seulement le PC aux adresses de la ROM BASIC (`rom_patches.c`). La
+garde qui vérifie que la ROM est vraiment servie n'existe qu'en co-simulation
+LOCI (`loci_emu_active`). Avec le Microdisc (ou LOCI intégré), sous ROMDIS,
+le code de la RAM overlay qui passe à l'une de ces adresses est détourné.
+
+Reproduit en natif avec CP/A (`-m atmos --disk-rom microdis.rom -d cpa.dsk`,
+`HEX DUN.SPR`) : la lecture directe de CP/A (BDOS 33, `rnd_rec`) passe en
+$E75A (`writeleader_entry` de BASIC 1.1) ; le détournement « CSAVE » (journal :
+« CSAVE: built TAP … prog $0000-$0000 ») finit par un `RTI` sur une pile qui
+n'est pas la sienne : retour en $07E7 avec le drapeau D mis. HEX affiche des
+zéros et des adresses décimales, LOGO s'arrête sur `*BRK*`.
+
+Proposition : ne rien intercepter quand `memory.basic_rom_disabled` est vrai
+ou `memory.rom_enabled` faux (même garde que la co-simulation). Vérifié en
+natif sur une copie corrigée de `main.c` : HEX et LOGO normaux.
+
+Contournement dans le port (`oric_machine.c`, `oric_machine_run_frame`) :
+`tape_patches` appelé seulement sous cette condition.

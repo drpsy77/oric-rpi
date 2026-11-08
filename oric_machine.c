@@ -594,7 +594,12 @@ void oric_machine_run_frame(void) {
     while (emu->raster_cycle < CYCLES_PER_FRAME && !emu->cpu.halted) {
         /* [port] breakpoint, debugger, trace, profiler supprimés */
 
-        tape_patches(emu);
+        /* [port] interceptions de la cassette seulement si la ROM BASIC est
+         * visible : sous ROMDIS (Microdisc, LOCI), le code de la RAM overlay
+         * (CP/A) passant en $E75A était pris pour un CSAVE (point 6 de
+         * docs/phosphoric-f8.md). */
+        if (!emu->memory.basic_rom_disabled && emu->memory.rom_enabled)
+            tape_patches(emu);
 
         /* Jasmin autoboot trap (gardé : la carte Jasmin fait partie du noyau) */
         if (emu->card_on[CARD_IDX_jasmin] && !emu->jasmin.autoboot_done && !emu->jasmin.romdis) {

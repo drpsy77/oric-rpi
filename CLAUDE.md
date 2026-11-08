@@ -244,7 +244,7 @@ mesure ajoutée par appui),
   bmarty) : ACIA de LOCI qui écrase les octets non lus (contourné), ACIA
   cadencée (contourné), disquettes non réécrites (contourné), pas de
   montage au démarrage (`locidisk`), `+++` non reconnu sur une ligne calme
-  (contourné).
+  (contourné), cassette interceptée sous ROMDIS (contourné).
 - Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
   MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
   pistes changées réécrites sur place 2 s après la dernière écriture (banc
