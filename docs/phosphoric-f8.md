@@ -136,9 +136,20 @@ $E75A (`writeleader_entry` de BASIC 1.1) ; le détournement « CSAVE » (journal
 n'est pas la sienne : retour en $07E7 avec le drapeau D mis. HEX affiche des
 zéros et des adresses décimales, LOGO s'arrête sur `*BRK*`.
 
-Proposition : ne rien intercepter quand `memory.basic_rom_disabled` est vrai
-ou `memory.rom_enabled` faux (même garde que la co-simulation). Vérifié en
-natif sur une copie corrigée de `main.c` : HEX et LOGO normaux.
+Oricutron, dont vient l'idée, enferme tout son `tape_patches` (`tape.c`)
+dans `if (oric->romon)` : il n'intercepte que si la ROM est visible.
+
+Propositions :
+
+1. Ne rien intercepter quand `memory.basic_rom_disabled` est vrai ou
+   `memory.rom_enabled` faux (la garde d'Oricutron, celle de la
+   co-simulation étendue à tous les cas). Vérifié en natif sur une copie
+   corrigée de `main.c` : HEX et LOGO normaux.
+2. Mieux, pour un émulateur qui vise l'exactitude au cycle : n'activer les
+   interceptions de CSAVE que si une cassette est demandée (`--tape`, ou une
+   option explicite), et non par défaut sans cassette. Un programme qui ne
+   touche pas à la cassette ne devrait jamais voir son exécution changée
+   par un raccourci d'émulateur.
 
 Contournement dans le port (`oric_machine.c`, `oric_machine_run_frame`) :
 `tape_patches` appelé seulement sous cette condition.
