@@ -39,14 +39,14 @@ Windows (SDL2 pour MinGW est téléchargé), emsdk actif pour le web
 | 9 | Clavier FR : signes de la v0.1 (ù ; * ' ; . : / ² ! \\) et `--kma FICHIER` | `e758bca`, `f33956b` |
 | 10 | Cassette : interceptions seulement si la ROM BASIC est visible | point 6 |
 | 11 | Windows : pile de 16 Mo (débordement au démarrage) | correctif |
+| 12 | `--disk-autosave` : pistes modifiées réécrites 2 s après la dernière écriture (Microdisc et LOCI, MFM compris), à la sortie et avant un changement de disquette ; web : disquettes gardées par le navigateur, bouton DSK (téléchargement), IDBFS des Emscripten récents | `disquette.c`, point 3 |
 
 Les patchs 3 et 11 corrigent le build Windows de la 2.31.15 lui-même : sans
 eux, il ne se lie pas, puis plante au démarrage.
 
 Non repris (propre à la Pi) : son HDMI, cadence multicœur, Wi-Fi de Circle,
-NTP, Ctrl+Alt+Suppr/Fin, F12. **Pas encore repris : la réécriture des
-disquettes de LOCI** (`disquette.c`, point 3) : sous Windows et sur le web,
-ce que CP/A écrit sur une disquette servie par LOCI est perdu à la fermeture.
+NTP, Ctrl+Alt+Suppr/Fin, F12. `mfm_inject_track` de `sedoric.c` est rendue
+publique au lieu d'être copiée comme dans `disquette.c`.
 
 ## Vérifié
 
@@ -57,6 +57,9 @@ ce que CP/A écrit sur une disquette servie par LOCI est perdu à la fermeture.
   `REMOTE 127.0.0.1:port` donne `CONNECT 9600` par Winsock, `+++` reconnu.
 - Web (Chrome) : touches physiques Q, 1, M, W, `;`, `:`, ù, ! donnent
   `A1MZ./;\` ; affichage téléviseur.
+- Disquettes (patch 12) : `REN X.SPR=DUN.SPR` sous CP/A, en LOCI (MFM) et en
+  Microdisc : piste réécrite pendant l'exécution, la disquette relue montre
+  X.SPR. Web : réécrite, gardée après rechargement, téléchargée par DSK.
 - Natif : sans le patch 10, `HEX DUN.SPR` sous CP/A (Microdisc) déclenche une
   fausse interception CSAVE ; avec, aucune.
 
@@ -65,5 +68,6 @@ ce que CP/A écrit sur une disquette servie par LOCI est perdu à la fermeture.
 Les patchs s'appliquent par `git am` sur `acfeacc` ; un par sujet, avec
 tests. Pour une demande de fusion : fork de Phosphoric sur GitHub, branche
 depuis `main`, `git am bureau/patches/*.patch`, puis une PR par groupe
-(Windows 3+6+11, clavier 1+2+9, affichage 4, ACIA 5+8, LOCI 7, cassette 10),
+(Windows 3+6+11, clavier 1+2+9, affichage 4, ACIA 5+8, LOCI 7, cassette 10,
+disquettes 12),
 avec `docs/phosphoric-f8.md` comme description des défauts.

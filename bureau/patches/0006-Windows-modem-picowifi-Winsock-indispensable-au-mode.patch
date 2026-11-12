@@ -1,7 +1,7 @@
 From 3ddbbc9c93272f1b164e7aedb7233c5129eb3c3f Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 08:59:33 +0100
-Subject: [PATCH 06/11] Windows : modem picowifi (Winsock), indispensable au
+Subject: [PATCH 06/12] Windows : modem picowifi (Winsock), indispensable au
  modem de LOCI ; reprise du port oric-rpi
 
 ---

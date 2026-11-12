@@ -1,7 +1,7 @@
 From 748dcd311e9e58163d46d3f083c61cb65f26b81f Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 09:02:27 +0100
-Subject: [PATCH 07/11] =?UTF-8?q?LOCI=20:=20--loci-disk=20GUEST,=20d=C3=A9?=
+Subject: [PATCH 07/12] =?UTF-8?q?LOCI=20:=20--loci-disk=20GUEST,=20d=C3=A9?=
  =?UTF-8?q?marrage=20direct=20sur=20une=20disquette=20de=20LOCI=20(A:),=20?=
  =?UTF-8?q?reprise=20du=20port=20oric-rpi=20(locidisk.c)?=
 MIME-Version: 1.0

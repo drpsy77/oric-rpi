@@ -1,7 +1,7 @@
 From 010057510cb596757efff21ea9a96ec3a9396eb8 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 09:02:27 +0100
-Subject: [PATCH 08/11] =?UTF-8?q?picowifi=20:=20+++=20reconnu=20apr=C3=A8s?=
+Subject: [PATCH 08/12] =?UTF-8?q?picowifi=20:=20+++=20reconnu=20apr=C3=A8s?=
  =?UTF-8?q?=20une=20seconde=20de=20silence=20(garde=20en=20temps,=20comme?=
  =?UTF-8?q?=20un=20modem=20Hayes)=20;=20reprise=20du=20port=20oric-rpi?=
 MIME-Version: 1.0

@@ -15,6 +15,12 @@ Réglages dans l'adresse (mémorisés par le navigateur) :
   loci=1, modem=1            cartouche LOCI, modem Wi-Fi ; avec les deux :
                              ACIA sans cadence, file de 256, contre-pression
                              (modemcadence=1 : comportement d'origine)
+Disquettes : ce que l'Oric écrit (SEDORIC, CP/A…) est réécrit 2 s après la
+dernière écriture et gardé par le navigateur (flash LOCI, ou disquette
+déposée sur la page) : on la retrouve modifiée au rechargement. Bouton DSK :
+télécharger la disquette du lecteur A: avec ses modifications. Effacer les
+données du site dans le navigateur efface aussi ces disquettes.
+
 Le reste (media=, rom=, relay=…) : docs/wasm.md de Phosphoric.
 
 Le fichier phosphoric.data contient les ROM de l'Oric (basic11b.rom,

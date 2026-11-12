@@ -46,11 +46,16 @@ Modem picowifi        disponible sous Windows (Winsock) ; « +++ » reconnu
 Cassette              plus d'interception de CSAVE/CLOAD quand la ROM BASIC
                       est cachée (CP/A : HEX, LOGO).
 
+--disk-autosave       (dans tous les .bat) disquettes réécrites 2 s après la
+                      dernière écriture de l'Oric, piste par piste : Microdisc
+                      (SEDORIC…) et LOCI (CP/A, format MFM compris), comme
+                      disquette.c sur la Pi. Aussi à la fermeture et avant un
+                      changement de disquette par le menu F1.
+
 LIMITES CONNUES
 ---------------
-- Disquettes servies par LOCI (format MFM, comme celles de CP/A) : les
-  écritures ne sont pas réécrites dans le fichier .dsk (Phosphoric : « writes
-  are session-only »). Le port Pi le fait (disquette.c), pas encore ici.
+- LOCI : si l'on change de disquette dans le menu (F8) moins de 2 s après une
+  écriture, cette dernière écriture est perdue (même limite que sur la Pi).
 - Pas de transports série tcp/pty/com sous Windows (seuls loopback, file:
   et picowifi).
 

@@ -1,7 +1,7 @@
 From 2b5ee22d3d1dca7d4ba3ebb989f2a3dbdf663168 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 08:58:22 +0100
-Subject: [PATCH 05/11] =?UTF-8?q?ACIA=20:=20--serial-rx-backpressure=20et?=
+Subject: [PATCH 05/12] =?UTF-8?q?ACIA=20:=20--serial-rx-backpressure=20et?=
  =?UTF-8?q?=20--serial-no-cadence=20(ACIA=20du=20firmware=20LOCI),=20d?=
  =?UTF-8?q?=C3=A9fauts=20du=20web=20avec=20LOCI=20+=20modem=20;=20reprise?=
  =?UTF-8?q?=20du=20port=20oric-rpi?=

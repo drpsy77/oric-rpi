@@ -1,7 +1,7 @@
 From c4da21c53899e1ddf2790662ff408651175c658c Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 08:51:28 +0100
-Subject: [PATCH 01/11] Clavier : disposition AZERTY positionnelle (-k fr),
+Subject: [PATCH 01/12] Clavier : disposition AZERTY positionnelle (-k fr),
  reprise du port oric-rpi
 
 ---
