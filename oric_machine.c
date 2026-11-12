@@ -19,7 +19,9 @@
 #include "emulator.h"
 #include "card_module.h"
 #include "cli/cli_opts.h"
+#include "cpu/microseq.h"
 #include "io/acia6551.h"
+#include "video/video.h"
 #include "io/io_bus.h"
 #include "io/tape_patches.h"
 #include "io/loci_glue.h"
@@ -590,7 +592,27 @@ void oric_machine_loci_kbd_report(uint8_t modifiers, const uint8_t keys[6]) {
 /* ── main.c : run_frame_instructions ───────────────────────────────────── */
 void oric_machine_run_frame(void) {
     emulator_t* emu = &s_emu;
+    /* [port] La boucle exécute des instructions entières : la dernière
+     * déborde de la trame de 1 à 6 cycles, que le CPU et le VIA ont comptés,
+     * mais emu_clock_frame_begin remet le faisceau à 0 et les perd. Un T1 à
+     * 19 968 cycles dérivait ainsi de 1 à 3 lignes par seconde (VSYNC.COM de
+     * CP/A ne se calait pas). Le débordement est reporté sur la trame
+     * suivante, comme Oricutron (point 7 de docs/phosphoric-f8.md ; correction
+     * amont : patch 13 de bureau/). Trame interrompue (halt) ou reprise d'un
+     * état : rien à reporter. */
+    const int report = emu->raster_cycle - CYCLES_PER_FRAME;
+    const bool reprise = emu->clock_resume_pending;
     emu_clock_frame_begin(emu);   /* master clock: start (or resume) of frame */
+    if (!reprise && report > 0 && report < PAL_CYCLES_PER_LINE) {
+        emu->raster_cycle = emu->frame_cycles = report;   /* raster_next_line reste à 64 */
+        /* ULA au cycle (défaut) : début de la ligne 0 et cellules déjà
+         * balayées ; en rendu ligne par ligne, la ligne 0 est émise à sa fin. */
+        if (emu->ula_per_cycle && cpu_microseq_enabled(&emu->cpu)) {
+            video_line_begin(&emu->video, emu->memory.ram, 0);
+            for (int c = 0; c < report - emu->ula_fetch_offset && c <= 40; c++)
+                video_render_cell(&emu->video, emu->memory.ram, 0, c);
+        }
+    }
     while (emu->raster_cycle < CYCLES_PER_FRAME && !emu->cpu.halted) {
         /* [port] breakpoint, debugger, trace, profiler supprimés */
 

@@ -153,3 +153,24 @@ Propositions :
 
 Contournement dans le port (`oric_machine.c`, `oric_machine_run_frame`) :
 `tape_patches` appelé seulement sous cette condition.
+
+## 7. Le faisceau perd le débordement de la dernière instruction de chaque trame
+
+`run_frame_instructions` (`src/main.c`) exécute des instructions entières tant
+que `raster_cycle < CYCLES_PER_FRAME` : la dernière déborde de 1 à 6 cycles.
+`emu_clock_frame_begin` (`src/emu_clock.c`) remet ensuite `raster_cycle` à 0 :
+le CPU et le VIA ont compté ces cycles, le faisceau non. Chaque trame dure
+donc pour lui 19 968 cycles plus le débordement. Un T1 à 50 Hz (latch 19 966,
+période 19 968) dérive de 1 à 3 lignes par seconde par rapport au balayage :
+`VSYNC.COM` de CP/A, qui le cale sur l'écran, ne tient pas ; sur Oricutron,
+qui reporte le débordement, il tient.
+
+Proposition : dans `emu_clock_frame_begin`, `raster_cycle -= CYCLES_PER_FRAME`
+(si le résultat est entre 0 et 63) au lieu de `= 0`, `frame_cycles` de même,
+`raster_next_line` à 64, et en ULA au cycle, rejouer les cellules de la
+ligne 0 déjà balayées (comme `emu_clock_resume`). Fait et testé dans le patch
+13 de `bureau/patches/` (tests de `test-clock`, qui échouent sans lui).
+
+Contournement dans le port : `oric_machine_run_frame` reporte le débordement
+après `emu_clock_frame_begin`.
+
