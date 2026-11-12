@@ -22,3 +22,7 @@ carte-sd/
 # Copie des sources de Phosphoric : régénérée par importer_phosphoric.sh
 # (voir README.md). Seuls le script et SOURCES.md sont versionnés.
 phosphoric/
+
+# Phosphoric pour Windows et le web (bureau/construire.sh)
+bureau/build/
+bureau/roms/

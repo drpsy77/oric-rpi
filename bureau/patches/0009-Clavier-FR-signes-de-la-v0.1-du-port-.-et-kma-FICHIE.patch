@@ -1,0 +1,314 @@
+From c3b6b78100f5e3e4a8335404b48d6858bb20ef12 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 09:03:33 +0100
+Subject: [PATCH 09/11] =?UTF-8?q?Clavier=20FR=20:=20signes=20de=20la=20v0.?=
+ =?UTF-8?q?1=20du=20port=20(=C3=B9=20;=20*=20'=20;=20.=20:=20/=20=C2=B2=20?=
+ =?UTF-8?q?!=20\)=20et=20--kma=20FICHIER=20(correspondance=20d'Oricutron)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ include/cli/cli_options.h  |   3 +-
+ include/cli/cli_opts.h     |   1 +
+ include/io/keyboard.h      |   9 +++
+ src/cli/cli_args.c         |   1 +
+ src/cli/cli_usage.c        |   1 +
+ src/io/keyboard.c          | 119 +++++++++++++++++++++++++++++++++----
+ src/main.c                 |   3 +
+ tests/unit/test_keyboard.c |  28 ++++++++-
+ 8 files changed, 150 insertions(+), 15 deletions(-)
+
+diff --git a/include/cli/cli_options.h b/include/cli/cli_options.h
+index f67e31d..860ef76 100644
+--- a/include/cli/cli_options.h
++++ b/include/cli/cli_options.h
+@@ -43,7 +43,7 @@ enum {
+     OPT_DISK_WEB, OPT_LOCI_WEB, OPT_LOCI_WEB_BASE, OPT_JASMIN_ROM,
+     OPT_CONFIG, OPT_NO_CONFIG, OPT_MENU_SCREENSHOT, OPT_GDB_BIND, OPT_NO_CONFIG_CARDS, OPT_NO_ROM,
+     OPT_NO_AUTO_LOCI, OPT_PIXELS, OPT_COLORS, OPT_SATURATION, OPT_BRIGHTNESS, OPT_COLOR,
+-    OPT_LOCI_DISK
++    OPT_LOCI_DISK, OPT_KMA
+ };
+ 
+ /* Short option string passed to getopt_long. */
+@@ -114,6 +114,7 @@ static const struct option long_options[] = {
+     {"no-border",           no_argument,       0, OPT_NO_BORDER},
+     {"pixels",              required_argument, 0, OPT_PIXELS},
+     {"loci-disk",           required_argument, 0, OPT_LOCI_DISK},
++    {"kma",                 required_argument, 0, OPT_KMA},
+     {"colors",              required_argument, 0, OPT_COLORS},
+     {"saturation",          required_argument, 0, OPT_SATURATION},
+     {"brightness",          required_argument, 0, OPT_BRIGHTNESS},
+diff --git a/include/cli/cli_opts.h b/include/cli/cli_opts.h
+index 3031915..f81dea0 100644
+--- a/include/cli/cli_opts.h
++++ b/include/cli/cli_opts.h
+@@ -112,6 +112,7 @@ typedef struct cli_opts_s {
+     const char* loci_usb_args[LOCI_USB_DEV_MAX];
+     int loci_usb_count;
+     bool loci_usb_autoscan;
++    const char* kma_file;         /* --kma FILE: Oricutron correspondence (-k fr) */
+     const char* loci_disk;        /* --loci-disk GUEST: boot on a LOCI disk image */
+     const char* trace_irq_file;
+     const char* psg_trace_file;
+diff --git a/include/io/keyboard.h b/include/io/keyboard.h
+index f3352e0..6aa0d3a 100644
+--- a/include/io/keyboard.h
++++ b/include/io/keyboard.h
+@@ -140,6 +140,15 @@ void oric_keyboard_press_rshift(oric_keyboard_t* kb);
+  * @return true if the event was mapped to an ORIC key
+  */
+ bool oric_keyboard_handle_sdl_event(oric_keyboard_t* kb, const SDL_Event* event);
++
++/**
++ * Loads an Oricutron correspondence file (.kma) for the FR layout: lines
++ * « PC key : ORIC key », SDL 1 key codes (the character of the key without
++ * Shift, e.g. 249 = ù; the ORIC side is its QWERTY keyboard). A key absent
++ * from the file keeps its place. oric-rpi port: clavier=oric/azerty.kma.
++ * @return number of correspondences, -1 if the file cannot be read
++ */
++int oric_keyboard_load_kma(const char* path);
+ #endif
+ 
+ #endif /* KEYBOARD_H */
+diff --git a/src/cli/cli_args.c b/src/cli/cli_args.c
+index 3fea769..54a1c06 100644
+--- a/src/cli/cli_args.c
++++ b/src/cli/cli_args.c
+@@ -142,6 +142,7 @@ int cli_parse_args(int argc, char* argv[], cli_opts_t* cfg, emulator_t* emu) {
+             case OPT_RENDER_SOFTWARE: cfg->render_software = true; break;
+             case OPT_NO_BORDER: emu->no_border = true; break;
+             case OPT_LOCI_DISK: cfg->loci_disk = optarg; break;
++            case OPT_KMA: cfg->kma_file = optarg; break;
+             case OPT_PIXELS:
+                 if (!display_parse_pixels(optarg, &cfg->display.pixels)) {
+                     fprintf(stderr, "Invalid --pixels: %s (tv, square or stretch)\n", optarg);
+diff --git a/src/cli/cli_usage.c b/src/cli/cli_usage.c
+index 0745630..d13cfee 100644
+--- a/src/cli/cli_usage.c
++++ b/src/cli/cli_usage.c
+@@ -101,6 +101,7 @@ void cli_print_usage(const char* program_name) {
+     usage_printf("  -m, --model MODEL          Machine model: oric1 or atmos (default: auto-detect)\n");
+     usage_printf("  -k, --keyboard LAYOUT      Keyboard layout: qwerty (default), azerty\n");
+     usage_printf("                             (by character) or fr (AZERTY by position)\n");
++    usage_printf("      --kma FILE             With -k fr: Oricutron correspondence file (.kma)\n");
+     usage_printf("  -j, --joystick MODE        Joystick: keys (arrow keys), gamepad (SDL2 controller)\n");
+     usage_printf("  -p, --printer FILE         Capture printer output to FILE (LPRINT/LLIST)\n");
+     usage_printf("      --printer-type TYPE    Printer type: text (default) or mcp40 (4-color plotter)\n");
+diff --git a/src/io/keyboard.c b/src/io/keyboard.c
+index e36eed3..b9fba12 100644
+--- a/src/io/keyboard.c
++++ b/src/io/keyboard.c
+@@ -34,6 +34,8 @@
+ 
+ #include "io/keyboard.h"
+ #include <string.h>
++#include <stdio.h>
++#include "utils/logging.h"
+ 
+ void oric_keyboard_init(oric_keyboard_t* kb) {
+     memset(kb, 0, sizeof(*kb));
+@@ -438,28 +440,119 @@ static const uint16_t fr_tab[64] = {
+ };
+ 
+ /* AZERTY: the key at a QWERTY position carries another label; return the
+- * scancode of the QWERTY key with that label (oric-rpi: AzertyToQwerty). */
++ * scancode of the QWERTY key the ORIC should see (oric-rpi: AzertyToQwerty,
++ * signs chosen by Pierre as in Oricutron's keymap/azerty.kma — PC key ->
++ * ORIC key, Shift giving the second sign of the ORIC key):
++ * ù -> ;   * -> '   ; -> .   : -> /   ² and ! -> \ */
+ static int fr_unmove(int sc) {
+     switch (sc) {
+-    case SDL_SCANCODE_Q:         return SDL_SCANCODE_A;          /* key A -> a */
+-    case SDL_SCANCODE_A:         return SDL_SCANCODE_Q;          /* key Q -> q */
+-    case SDL_SCANCODE_W:         return SDL_SCANCODE_Z;          /* key Z -> z */
+-    case SDL_SCANCODE_Z:         return SDL_SCANCODE_W;          /* key W -> w */
+-    case SDL_SCANCODE_SEMICOLON: return SDL_SCANCODE_M;          /* key M -> m */
+-    case SDL_SCANCODE_M:         return SDL_SCANCODE_COMMA;      /* key , -> , */
+-    case SDL_SCANCODE_COMMA:     return SDL_SCANCODE_SEMICOLON;  /* key ; -> ; */
+-    case SDL_SCANCODE_DELETE:    return SDL_SCANCODE_BACKSPACE;  /* Suppr = DEL */
+-    case SDL_SCANCODE_NONUSHASH: return SDL_SCANCODE_BACKSLASH;  /* ISO key * of AZERTY */
+-    case SDL_SCANCODE_KP_ENTER:  return SDL_SCANCODE_RETURN;
+-    default:                     return sc;
++    case SDL_SCANCODE_Q:          return SDL_SCANCODE_A;          /* key A -> a */
++    case SDL_SCANCODE_A:          return SDL_SCANCODE_Q;          /* key Q -> q */
++    case SDL_SCANCODE_W:          return SDL_SCANCODE_Z;          /* key Z -> z */
++    case SDL_SCANCODE_Z:          return SDL_SCANCODE_W;          /* key W -> w */
++    case SDL_SCANCODE_SEMICOLON:  return SDL_SCANCODE_M;          /* key M -> m */
++    case SDL_SCANCODE_M:          return SDL_SCANCODE_COMMA;      /* key , -> , */
++    case SDL_SCANCODE_COMMA:      return SDL_SCANCODE_PERIOD;     /* key ; -> . */
++    case SDL_SCANCODE_PERIOD:     return SDL_SCANCODE_SLASH;      /* key : -> / */
++    case SDL_SCANCODE_APOSTROPHE: return SDL_SCANCODE_SEMICOLON;  /* key ù -> ; */
++    case SDL_SCANCODE_NONUSHASH:                                  /* key * -> ' (ISO; */
++    case SDL_SCANCODE_BACKSLASH:  return SDL_SCANCODE_APOSTROPHE; /*   0x31 on some) */
++    case SDL_SCANCODE_GRAVE:                                      /* key ² -> \ */
++    case SDL_SCANCODE_SLASH:      return SDL_SCANCODE_BACKSLASH;  /* key ! -> \ */
++    case SDL_SCANCODE_DELETE:     return SDL_SCANCODE_BACKSPACE;  /* Suppr = DEL */
++    case SDL_SCANCODE_KP_ENTER:   return SDL_SCANCODE_RETURN;
++    default:                      return sc;
+     }
+ }
+ 
++/* PC scancode -> QWERTY scancode looked up in fr_tab (built-in table, or a
++ * correspondence file, oric_keyboard_load_kma). */
++static uint8_t fr_map[256];
++static bool fr_map_ready;
++
++static void fr_map_default(void) {
++    for (int i = 0; i < 256; i++) fr_map[i] = (uint8_t)fr_unmove(i);
++    fr_map_ready = true;
++}
++
++/* Oricutron key codes (SDL 1: the character of the key without Shift; 8, 9,
++ * 13, 27, 127, arrows 273-276) of each position, on a QWERTY keyboard (ORIC
++ * side of a .kma file) and on a French AZERTY one (PC side). oric-rpi:
++ * kernel.cpp, s_Layout. */
++static const struct { uint8_t sc; uint16_t qwerty, azerty; } kma_layout[] = {
++    { 0x04, 'a', 'q' }, { 0x05, 'b', 'b' }, { 0x06, 'c', 'c' }, { 0x07, 'd', 'd' },
++    { 0x08, 'e', 'e' }, { 0x09, 'f', 'f' }, { 0x0A, 'g', 'g' }, { 0x0B, 'h', 'h' },
++    { 0x0C, 'i', 'i' }, { 0x0D, 'j', 'j' }, { 0x0E, 'k', 'k' }, { 0x0F, 'l', 'l' },
++    { 0x10, 'm', ',' }, { 0x11, 'n', 'n' }, { 0x12, 'o', 'o' }, { 0x13, 'p', 'p' },
++    { 0x14, 'q', 'a' }, { 0x15, 'r', 'r' }, { 0x16, 's', 's' }, { 0x17, 't', 't' },
++    { 0x18, 'u', 'u' }, { 0x19, 'v', 'v' }, { 0x1A, 'w', 'z' }, { 0x1B, 'x', 'x' },
++    { 0x1C, 'y', 'y' }, { 0x1D, 'z', 'w' },
++    { 0x1E, '1', '&' }, { 0x1F, '2', 233 }, { 0x20, '3', '"' }, { 0x21, '4', '\'' },
++    { 0x22, '5', '(' }, { 0x23, '6', '-' }, { 0x24, '7', 232 }, { 0x25, '8', '_' },
++    { 0x26, '9', 231 }, { 0x27, '0', 224 },
++    { 0x28, 13, 13 }, { 0x29, 27, 27 }, { 0x2A, 8, 8 }, { 0x2B, 9, 9 }, { 0x2C, ' ', ' ' },
++    { 0x2D, '-', ')' }, { 0x2E, '=', '=' }, { 0x2F, '[', '^' }, { 0x30, ']', '$' },
++    { 0x31, '\\', '*' }, { 0x32, '#', '*' }, { 0x33, ';', 'm' }, { 0x34, '\'', 249 },
++    { 0x35, '`', 178 }, { 0x36, ',', ';' }, { 0x37, '.', ':' }, { 0x38, '/', '!' },
++    { 0x4C, 127, 127 }, { 0x4F, 275, 275 }, { 0x50, 276, 276 }, { 0x51, 274, 274 },
++    { 0x52, 273, 273 }, { 0x64, '\\', '<' }
++};
++
++static bool fr_is_oric_key(int sc) {
++    for (int j = 0; j < 64; j++) if (fr_tab[j] == sc) return true;
++    return false;
++}
++
++int oric_keyboard_load_kma(const char* path) {
++    FILE* f = fopen(path, "r");
++    if (!f) {
++        log_error("Keyboard: %s not found, built-in AZERTY table kept", path);
++        return -1;
++    }
++    /* A key absent from the file keeps its place (not the built-in signs). */
++    for (int i = 0; i < 256; i++) fr_map[i] = (uint8_t)i;
++    fr_map[SDL_SCANCODE_DELETE] = SDL_SCANCODE_BACKSPACE;
++    fr_map[SDL_SCANCODE_KP_ENTER] = SDL_SCANCODE_RETURN;
++    fr_map_ready = true;
++
++    const int n_layout = (int)(sizeof(kma_layout) / sizeof(kma_layout[0]));
++    int nline = 0, ok = 0;
++    char line[80];
++    while (fgets(line, sizeof(line), f)) {
++        nline++;
++        line[strcspn(line, "#\r\n")] = '\0';           /* comment, end of line */
++        unsigned host, oric;
++        char end;
++        int nf = sscanf(line, "%u : %u %c", &host, &oric, &end);
++        if (nf <= 0) continue;                          /* empty line */
++        int target = -1;                                /* QWERTY position of the ORIC key */
++        for (int k = 0; k < n_layout; k++)
++            if (kma_layout[k].qwerty == oric && fr_is_oric_key(kma_layout[k].sc)) {
++                target = kma_layout[k].sc;
++                break;
++            }
++        bool found = false;                             /* every PC key with this sign */
++        for (int k = 0; nf == 2 && target >= 0 && k < n_layout; k++)
++            if (kma_layout[k].azerty == host) {
++                fr_map[kma_layout[k].sc] = (uint8_t)target;
++                found = true;
++            }
++        if (found) ok++;
++        else log_warning("Keyboard: %s line %d refused: %s", path, nline, line);
++    }
++    fclose(f);
++    log_info("Keyboard: %s, %d correspondence(s) (AZERTY keyboard)", path, ok);
++    return ok;
++}
++
+ static bool handle_fr(oric_keyboard_t* kb, const SDL_Event* event) {
+     if (event->type != SDL_KEYDOWN && event->type != SDL_KEYUP)
+         return false;   /* SDL_TEXTINPUT is not used */
+ 
+-    int sc = fr_unmove((int)event->key.keysym.scancode);
++    if (!fr_map_ready) fr_map_default();
++    int sc = (int)event->key.keysym.scancode;
++    if (sc < 0 || sc > 255) return false;
++    sc = fr_map[sc];
+     bool down = (event->type == SDL_KEYDOWN);
+ 
+     for (int i = 0; i < 64; i++) {
+diff --git a/src/main.c b/src/main.c
+index 8f6e7c4..533e4cd 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -2839,6 +2839,9 @@ static int main_setup_input_printer(emulator_t* emu, cli_opts_t* cfg) {
+     } else if (cfg->keyboard_layout && strcasecmp(cfg->keyboard_layout, "fr") == 0) {
+         oric_keyboard_set_layout(&emu->keyboard, ORIC_KB_FR);
+         log_info("Keyboard layout: FR (positional AZERTY)");
++#ifdef HAS_SDL2
++        if (cfg->kma_file) oric_keyboard_load_kma(cfg->kma_file);
++#endif
+     } else {
+         log_info("Keyboard layout: QWERTY");
+     }
+diff --git a/tests/unit/test_keyboard.c b/tests/unit/test_keyboard.c
+index 39cdde5..150f9c4 100644
+--- a/tests/unit/test_keyboard.c
++++ b/tests/unit/test_keyboard.c
+@@ -628,7 +628,12 @@ TEST(test_fr_letters_by_label) {
+     ASSERT_TRUE(fr_check(SDL_SCANCODE_Z, 6, 7));          /* AZERTY key W -> W */
+     ASSERT_TRUE(fr_check(SDL_SCANCODE_SEMICOLON, 2, 0));  /* AZERTY key M -> M */
+     ASSERT_TRUE(fr_check(SDL_SCANCODE_M, 4, 1));          /* AZERTY key , -> , */
+-    ASSERT_TRUE(fr_check(SDL_SCANCODE_COMMA, 3, 2));      /* AZERTY key ; -> ; */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_COMMA, 4, 2));      /* AZERTY key ; -> . */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_PERIOD, 7, 3));     /* AZERTY key : -> / */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_APOSTROPHE, 3, 2)); /* AZERTY key ù -> ; */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_NONUSHASH, 3, 7));  /* AZERTY key * -> ' */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_SLASH, 3, 6));      /* AZERTY key ! -> \ */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_GRAVE, 3, 6));      /* AZERTY key ² -> \ */
+     ASSERT_TRUE(fr_check(SDL_SCANCODE_E, 6, 3));          /* unmoved letter */
+ }
+ 
+@@ -650,6 +655,26 @@ TEST(test_fr_specials_and_modifiers) {
+     ASSERT_TRUE(fr_check(SDL_SCANCODE_UP, 4, 3));
+ }
+ 
++TEST(test_fr_kma_file) {
++    /* Pierre's azerty.kma (oric-rpi sdcard/): same result as the built-in
++     * table for the signs, plus < -> \ ; a refused line does not stop it. */
++    const char* path = "/tmp/phosphoric_test_azerty.kma";
++    FILE* f = fopen(path, "w");
++    ASSERT_TRUE(f != NULL);
++    fputs("# test\n97 : 97\n113 : 113\n122 : 122\n119 : 119\n109 : 109\n44 : 44\n"
++          "38 : 49\n249 : 59\n42 : 39\n59 : 46\n58 : 47\n33 : 92\n60 : 92\n"
++          "999 : 1\n", f);
++    fclose(f);
++    ASSERT_EQ(oric_keyboard_load_kma(path), 13);
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_Q, 6, 5));          /* a */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_1, 0, 5));          /* & key -> 1 */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_APOSTROPHE, 3, 2)); /* ù -> ; */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_NONUSBACKSLASH, 3, 6)); /* < -> \ */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_DELETE, 5, 5));     /* Suppr kept = DEL */
++    ASSERT_EQ(oric_keyboard_load_kma("/nonexistent.kma"), -1);
++    remove(path);
++}
++
+ TEST(test_fr_ignores_textinput) {
+     oric_keyboard_t kb;
+     oric_keyboard_init(&kb);
+@@ -677,6 +702,7 @@ int main(void) {
+     RUN(test_fr_digits_without_shift);
+     RUN(test_fr_specials_and_modifiers);
+     RUN(test_fr_ignores_textinput);
++    RUN(test_fr_kma_file);
+ 
+     printf("\n  press_char API:\n");
+     RUN(test_press_char_letter_A);
+-- 
+2.43.0
+

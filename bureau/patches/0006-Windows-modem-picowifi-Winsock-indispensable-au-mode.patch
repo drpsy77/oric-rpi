@@ -1,0 +1,298 @@
+From 3ddbbc9c93272f1b164e7aedb7233c5129eb3c3f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 08:59:33 +0100
+Subject: [PATCH 06/11] Windows : modem picowifi (Winsock), indispensable au
+ modem de LOCI ; reprise du port oric-rpi
+
+---
+ Makefile                    |   2 +-
+ src/io/serial_backend_win.c |  10 ++--
+ src/io/serial_picowifi.c    | 109 +++++++++++++++++++++++++++++++-----
+ 3 files changed, 100 insertions(+), 21 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index c95d82f..ce530f5 100644
+--- a/Makefile
++++ b/Makefile
+@@ -265,7 +265,7 @@ endif
+ 
+ # Windows v1 : swap the POSIX-only modules for their Windows variants
+ ifeq ($(WIN), 1)
+-    SOURCES := $(filter-out src/io/serial_backend.c src/io/serial_picowifi.c \
++    SOURCES := $(filter-out src/io/serial_backend.c \
+                             src/network/gdbstub.c src/storage/disk_http.c, $(SOURCES))
+     SOURCES += src/io/serial_backend_win.c src/network/gdbstub_win.c \
+                src/storage/disk_http_win.c
+diff --git a/src/io/serial_backend_win.c b/src/io/serial_backend_win.c
+index 34a4a8f..600a804 100644
+--- a/src/io/serial_backend_win.c
++++ b/src/io/serial_backend_win.c
+@@ -5,8 +5,9 @@
+  * @author bmarty <bmarty@mailo.com>
+  *
+  * Windows v1 scope: the pure-stdio backends (loopback, file) are fully
+- * functional; the POSIX transports (tcp, pty, modem, com, digitelec,
+- * picowifi) and host MIDI/SMF return NULL with a clear message. The
++ * functional; the POSIX transports (tcp, pty, modem, com, digitelec)
++ * and host MIDI/SMF return NULL with a clear message. The picowifi modem
++ * is serial_picowifi.c itself, ported to Winsock. The
+  * full serial_backend.h symbol surface is provided so main.c, dtl2000
+  * and mageco link unchanged.
+  */
+@@ -180,7 +181,7 @@ static serial_backend_t* win_unavailable(const char* what)
+ {
+     log_error("Serial %s: non disponible dans le build Windows v1 "
+               "(transports POSIX) — utilisez loopback ou file:, ou la "
+-              "version Linux/WSL2 pour tcp/pty/modem/com/picowifi", what);
++              "version Linux/WSL2 pour tcp/pty/modem/com", what);
+     return NULL;
+ }
+ 
+@@ -199,8 +200,7 @@ serial_backend_t* serial_backend_com_create(const char* config)
+ serial_backend_t* serial_backend_digitelec_create(const char* host, uint16_t port, void* acia)
+ { (void)host; (void)port; (void)acia; return win_unavailable("digitelec"); }
+ 
+-serial_backend_t* serial_backend_picowifi_create(const char* ssid, const char* pass)
+-{ (void)ssid; (void)pass; return win_unavailable("picowifi"); }
++/* picowifi: serial_picowifi.c, ported to Winsock (oric-rpi port). */
+ 
+ serial_backend_t* serial_backend_midi_create(const char* target)
+ { (void)target; return win_unavailable("midi"); }
+diff --git a/src/io/serial_picowifi.c b/src/io/serial_picowifi.c
+index 4ee0a23..6f9ff0b 100644
+--- a/src/io/serial_picowifi.c
++++ b/src/io/serial_picowifi.c
+@@ -50,12 +50,38 @@
+ #include <stdio.h>
+ #include <stdint.h>
+ #include <stdbool.h>
+-#include <unistd.h>
+-#include <fcntl.h>
+ #include <errno.h>
+ #include <ctype.h>
+ #include <time.h>
+ #include <sys/types.h>
++#ifdef _WIN32
++/* Windows (MinGW, oric-rpi port): Winsock in place of the POSIX sockets.
++ * Sockets are SOCKET handles stored in an int (they fit), closed by
++ * closesocket(), read/written by recv()/send(), polled by WSAPoll(); the
++ * non-blocking mode is ioctlsocket(FIONBIO). */
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#include <strings.h>
++#include <unistd.h>
++#define poll(p, n, ms) WSAPoll((p), (n), (ms))
++static void pw_sock_close(int fd) { closesocket((SOCKET)fd); }
++static void pw_sock_nonblock(int fd, bool on) {
++    u_long m = on ? 1 : 0;
++    ioctlsocket((SOCKET)fd, FIONBIO, &m);
++}
++/* Winsock error of the last call → errno, as the POSIX code expects. */
++static void pw_sock_errno(void) {
++    int e = WSAGetLastError();
++    errno = (e == WSAEWOULDBLOCK || e == WSAEINPROGRESS) ? EAGAIN
++          : (e == WSAEINTR) ? EINTR : EIO;
++}
++static void pw_wsa_init(void) {
++    static bool done;
++    if (!done) { WSADATA w; WSAStartup(MAKEWORD(2, 2), &w); done = true; }
++}
++#else
++#include <unistd.h>
++#include <fcntl.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <netinet/tcp.h>
+@@ -63,6 +89,13 @@
+ #include <poll.h>
+ #include <arpa/inet.h>
+ #include <ifaddrs.h>
++static void pw_sock_close(int fd) { close(fd); }
++static void pw_sock_nonblock(int fd, bool on) {
++    int flags = fcntl(fd, F_GETFL, 0);
++    fcntl(fd, F_SETFL, on ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK));
++}
++static void pw_wsa_init(void) {}
++#endif
+ 
+ #ifdef HAS_PICOTLS
+ #include <openssl/ssl.h>
+@@ -349,7 +382,12 @@ static ssize_t pw_read(int fd, void* buf, size_t n)
+     }
+ #endif
+     ssize_t r;
++#ifdef _WIN32
++    do { r = recv((SOCKET)fd, (char*)buf, (int)n, 0); if (r < 0) pw_sock_errno(); }
++    while (r < 0 && errno == EINTR);
++#else
+     do { r = read(fd, buf, n); } while (r < 0 && errno == EINTR);
++#endif
+     return r;
+ }
+ 
+@@ -363,7 +401,12 @@ static ssize_t pw_write(int fd, const void* buf, size_t n)
+     }
+ #endif
+     ssize_t r;
++#ifdef _WIN32
++    do { r = send((SOCKET)fd, (const char*)buf, (int)n, 0); if (r < 0) pw_sock_errno(); }
++    while (r < 0 && errno == EINTR);
++#else
+     do { r = write(fd, buf, n); } while (r < 0 && errno == EINTR);
++#endif
+     return r;
+ }
+ 
+@@ -373,7 +416,7 @@ static void pw_close(int fd)
+ #ifdef __EMSCRIPTEN__
+     if (pw_is_ws(fd)) { pw_js_close(fd - PW_WS_FD_BASE); return; }
+ #endif
+-    close(fd);
++    pw_sock_close(fd);
+ }
+ 
+ /* Waits up to `ms` for fd to be ready for `events` (POLLIN/POLLOUT). In the
+@@ -388,7 +431,11 @@ static bool pw_wait(int fd, short events, int ms)
+         return true;
+     }
+ #endif
++#ifdef _WIN32
++    WSAPOLLFD pfd = { .fd = (SOCKET)fd, .events = events };
++#else
+     struct pollfd pfd = { .fd = fd, .events = events };
++#endif
+     return poll(&pfd, 1, ms) > 0 && (pfd.revents & events);
+ }
+ 
+@@ -749,6 +796,7 @@ static int pw_tcp_connect(const char* host, uint16_t port)
+ #ifdef __EMSCRIPTEN__
+     return pw_ws_connect(host, port, false);
+ #endif
++    pw_wsa_init();
+     struct addrinfo hints, *res, *rp;
+     char port_str[16];
+     memset(&hints, 0, sizeof(hints));
+@@ -763,19 +811,23 @@ static int pw_tcp_connect(const char* host, uint16_t port)
+     }
+     int fd = -1;
+     for (rp = res; rp; rp = rp->ai_next) {
++#ifdef _WIN32
++        SOCKET s = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
++        fd = s == INVALID_SOCKET ? -1 : (int)s;
++#else
+         fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
++#endif
+         if (fd < 0) continue;
+-        if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) break;
+-        close(fd);
++        if (connect(fd, rp->ai_addr, (int)rp->ai_addrlen) == 0) break;
++        pw_sock_close(fd);
+         fd = -1;
+     }
+     freeaddrinfo(res);
+     if (fd < 0) return -1;
+ 
+-    int flags = fcntl(fd, F_GETFL, 0);
+-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
++    pw_sock_nonblock(fd, true);
+     int one = 1;
+-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
++    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const void*)&one, sizeof(one));
+     return fd;
+ }
+ 
+@@ -829,11 +881,14 @@ static bool pw_tls_wrap(picowifi_t* pw, int fd, const char* host)
+     }
+ 
+     /* Handshake blocking with a 10 s guard, then back to non-blocking. */
+-    int flags = fcntl(fd, F_GETFL, 0);
+-    fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
++    pw_sock_nonblock(fd, false);
++#ifdef _WIN32
++    DWORD tv = 10000;
++#else
+     struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
++#endif
++    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const void*)&tv, sizeof(tv));
++    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const void*)&tv, sizeof(tv));
+ 
+     int rc = SSL_connect(ssl);
+     if (rc != 1) {
+@@ -847,7 +902,7 @@ static bool pw_tls_wrap(picowifi_t* pw, int fd, const char* host)
+         return false;
+     }
+ 
+-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);        /* restore non-blocking */
++    pw_sock_nonblock(fd, true);                    /* restore non-blocking */
+     pw->ssl = ssl;
+     pw->ssl_ctx = ctx;
+     log_info("PicoWiFi: TLS session up (%s, %sverified) to %s",
+@@ -1089,6 +1144,23 @@ static void pw_tn_rx_byte(picowifi_t* pw, uint8_t b)
+ static void pw_host_local_ip(char* out, size_t osz)
+ {
+     snprintf(out, osz, "0.0.0.0");
++#ifdef _WIN32
++    /* No getifaddrs: address of the outbound route (UDP connect, no packet). */
++    pw_wsa_init();
++    SOCKET s = socket(AF_INET, SOCK_DGRAM, 0);
++    if (s == INVALID_SOCKET) return;
++    struct sockaddr_in sa, local;
++    memset(&sa, 0, sizeof(sa));
++    sa.sin_family = AF_INET;
++    sa.sin_port = htons(53);
++    inet_pton(AF_INET, "8.8.8.8", &sa.sin_addr);
++    int l = sizeof(local);
++    if (connect(s, (struct sockaddr*)&sa, sizeof(sa)) == 0 &&
++        getsockname(s, (struct sockaddr*)&local, &l) == 0)
++        inet_ntop(AF_INET, &local.sin_addr, out, (socklen_t)osz);
++    closesocket(s);
++    return;
++#else
+     struct ifaddrs* ifa = NULL;
+     if (getifaddrs(&ifa) != 0) return;
+     char loop[INET_ADDRSTRLEN] = {0};
+@@ -1104,6 +1176,7 @@ static void pw_host_local_ip(char* out, size_t osz)
+     }
+     if (loop[0]) snprintf(out, osz, "%s", loop);
+     freeifaddrs(ifa);
++#endif
+ }
+ 
+ /* True if the host has a route to the internet. Uses the classic "UDP
+@@ -1114,7 +1187,13 @@ static bool pw_host_online(void)
+ #ifdef __EMSCRIPTEN__
+     return pw_js_online() != 0;      /* navigator.onLine */
+ #endif
++    pw_wsa_init();
++#ifdef _WIN32
++    SOCKET ws = socket(AF_INET, SOCK_DGRAM, 0);
++    int fd = ws == INVALID_SOCKET ? -1 : (int)ws;
++#else
+     int fd = socket(AF_INET, SOCK_DGRAM, 0);
++#endif
+     if (fd < 0) return false;
+     struct sockaddr_in sa;
+     memset(&sa, 0, sizeof(sa));
+@@ -1131,7 +1210,7 @@ static bool pw_host_online(void)
+             ok = (strcmp(ip, "0.0.0.0") != 0 && strcmp(ip, "127.0.0.1") != 0);
+         }
+     }
+-    close(fd);
++    pw_sock_close(fd);
+     return ok;
+ }
+ 
+@@ -2101,7 +2180,7 @@ static void picowifi_close(serial_backend_t* self)
+     picowifi_t* pw = (picowifi_t*)self->state.picowifi.impl;
+     if (!pw) return;
+     pw_conn_close(pw);
+-    if (pw->listen_fd >= 0) { close(pw->listen_fd); pw->listen_fd = -1; }
++    if (pw->listen_fd >= 0) { pw_sock_close(pw->listen_fd); pw->listen_fd = -1; }
+     if (pw->disk_wr_buf) { free(pw->disk_wr_buf); pw->disk_wr_buf = NULL; }
+     free(pw->rx_buf);
+     pw->rx_buf = NULL;
+-- 
+2.43.0
+

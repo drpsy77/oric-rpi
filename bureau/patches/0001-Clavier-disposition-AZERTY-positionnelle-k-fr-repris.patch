@@ -1,0 +1,335 @@
+From c4da21c53899e1ddf2790662ff408651175c658c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 08:51:28 +0100
+Subject: [PATCH 01/11] Clavier : disposition AZERTY positionnelle (-k fr),
+ reprise du port oric-rpi
+
+---
+ include/io/keyboard.h         |  5 ++-
+ include/video/iomenu.h        |  3 +-
+ src/cli/cli_usage.c           |  3 +-
+ src/io/keyboard.c             | 68 +++++++++++++++++++++++++++++++++++
+ src/iomenu_glue.c             | 16 ++++++---
+ src/main.c                    |  3 ++
+ src/video/iomenu.c            |  2 +-
+ tests/unit/test_iomenu_glue.c |  2 ++
+ tests/unit/test_keyboard.c    | 66 ++++++++++++++++++++++++++++++++++
+ 9 files changed, 160 insertions(+), 8 deletions(-)
+
+diff --git a/include/io/keyboard.h b/include/io/keyboard.h
+index 75e11b9..f3352e0 100644
+--- a/include/io/keyboard.h
++++ b/include/io/keyboard.h
+@@ -37,7 +37,10 @@
+ /** Keyboard layout selection */
+ typedef enum {
+     ORIC_KB_QWERTY = 0,  /**< QWERTY positional layout */
+-    ORIC_KB_AZERTY        /**< Symbolic mapping (AZERTY/any layout via TEXTINPUT) */
++    ORIC_KB_AZERTY,       /**< Symbolic mapping (AZERTY/any layout via TEXTINPUT) */
++    ORIC_KB_FR            /**< Positional mapping for a French AZERTY keyboard
++                               (SDL scancodes = USB HID usages, as on the
++                               oric-rpi bare-metal port, keymap=FR) */
+ } oric_kb_layout_t;
+ 
+ /** Max simultaneous key presses tracked in symbolic mode */
+diff --git a/include/video/iomenu.h b/include/video/iomenu.h
+index 8cee86d..78094fa 100644
+--- a/include/video/iomenu.h
++++ b/include/video/iomenu.h
+@@ -76,7 +76,7 @@ typedef enum {
+     IOM_ACT_SNAPSHOT_LOAD,     /* path */
+     IOM_ACT_PRINTER_CYCLE,     /* off → text → MCP-40 → off */
+     IOM_ACT_JOYSTICK_CYCLE,    /* none → keyboard → gamepad → none */
+-    IOM_ACT_KEYBOARD_TOGGLE,   /* QWERTY ↔ AZERTY */
++    IOM_ACT_KEYBOARD_TOGGLE,   /* QWERTY → AZERTY → AZERTY positional */
+     IOM_ACT_TAPE_FAST_TOGGLE,  /* fast loading ↔ real speed */
+     IOM_ACT_RESET,
+     IOM_ACT_SAVE_CONFIG,
+@@ -123,6 +123,7 @@ typedef struct {
+     char printer_file[IOM_NAME_MAX];
+     iom_joy_t joystick;
+     bool azerty;
++    bool kb_fr;              /* positional AZERTY (-k fr) */
+     char snapshot_last[IOM_NAME_MAX];
+     iom_card_t card[IOM_CARDS];
+     int  cards;
+diff --git a/src/cli/cli_usage.c b/src/cli/cli_usage.c
+index 158ff8c..839baff 100644
+--- a/src/cli/cli_usage.c
++++ b/src/cli/cli_usage.c
+@@ -99,7 +99,8 @@ void cli_print_usage(const char* program_name) {
+     usage_printf("      --video-fps N          Recording frame rate (default: 50)\n");
+     usage_printf("      --video-quality N      JPEG quality 1..100 (default: 85)\n");
+     usage_printf("  -m, --model MODEL          Machine model: oric1 or atmos (default: auto-detect)\n");
+-    usage_printf("  -k, --keyboard LAYOUT      Keyboard layout: qwerty (default) or azerty\n");
++    usage_printf("  -k, --keyboard LAYOUT      Keyboard layout: qwerty (default), azerty\n");
++    usage_printf("                             (by character) or fr (AZERTY by position)\n");
+     usage_printf("  -j, --joystick MODE        Joystick: keys (arrow keys), gamepad (SDL2 controller)\n");
+     usage_printf("  -p, --printer FILE         Capture printer output to FILE (LPRINT/LLIST)\n");
+     usage_printf("      --printer-type TYPE    Printer type: text (default) or mcp40 (4-color plotter)\n");
+diff --git a/src/io/keyboard.c b/src/io/keyboard.c
+index 204806b..e36eed3 100644
+--- a/src/io/keyboard.c
++++ b/src/io/keyboard.c
+@@ -22,6 +22,13 @@
+  * The character -> ORIC mapping is derived from the ORIC-1 BASIC 1.0 ROM
+  * keyboard decode tables at $FF70 (unshifted) and $FFB0 (shifted).
+  *
++ * FR (positional AZERTY): each physical key goes to the ORIC key at the
++ * same place, read from the SDL scancode (= USB HID usage, independent of
++ * the host layout). The letters that AZERTY moves (A/Q, Z/W, M) and the
++ * comma / semicolon keys are brought back to their label, so the PC key
++ * marked "A" types A. The digit row gives digits without Shift, as on the
++ * ORIC. Ported from the oric-rpi bare-metal port (kernel.cpp, keymap=FR).
++ *
+  * Key mapping tables based on Oricutron by Peter Gordon (GPL v2).
+  */
+ 
+@@ -408,11 +415,72 @@ static bool handle_symbolic(oric_keyboard_t* kb, const SDL_Event* event) {
+     return false;
+ }
+ 
++
++/* ================================================================
++ * FR positional mapping (French AZERTY keyboard, by scancode)
++ * ================================================================
++ *
++ * Same layout as qwerty_tab, but with SDL scancodes, which are the USB HID
++ * usage codes: the table is the one of the oric-rpi port (kernel.cpp,
++ * s_OricKeys), where a USB keyboard is read in raw mode. Scancodes follow
++ * the physical position of the keys whatever the host layout, so the
++ * AZERTY-moved letters are brought back to their label by fr_unmove().
++ */
++static const uint16_t fr_tab[64] = {
++    /* Col 0 */ SDL_SCANCODE_7, SDL_SCANCODE_N, SDL_SCANCODE_5, SDL_SCANCODE_V, SDL_SCANCODE_RCTRL,  SDL_SCANCODE_1,         SDL_SCANCODE_X,            SDL_SCANCODE_3,
++    /* Col 1 */ SDL_SCANCODE_J, SDL_SCANCODE_T, SDL_SCANCODE_R, SDL_SCANCODE_F, 0,                   SDL_SCANCODE_ESCAPE,    SDL_SCANCODE_Q,            SDL_SCANCODE_D,
++    /* Col 2 */ SDL_SCANCODE_M, SDL_SCANCODE_6, SDL_SCANCODE_B, SDL_SCANCODE_4, SDL_SCANCODE_LCTRL,  SDL_SCANCODE_Z,         SDL_SCANCODE_2,            SDL_SCANCODE_C,
++    /* Col 3 */ SDL_SCANCODE_K, SDL_SCANCODE_9, SDL_SCANCODE_SEMICOLON, SDL_SCANCODE_MINUS, 0,       0,                      SDL_SCANCODE_BACKSLASH,    SDL_SCANCODE_APOSTROPHE,
++    /* Col 4 */ SDL_SCANCODE_SPACE, SDL_SCANCODE_COMMA, SDL_SCANCODE_PERIOD, SDL_SCANCODE_UP, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN,    SDL_SCANCODE_RIGHT,
++    /* Col 5 */ SDL_SCANCODE_U, SDL_SCANCODE_I, SDL_SCANCODE_O, SDL_SCANCODE_P, SDL_SCANCODE_LALT,   SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_RIGHTBRACKET, SDL_SCANCODE_LEFTBRACKET,
++    /* Col 6 */ SDL_SCANCODE_Y, SDL_SCANCODE_H, SDL_SCANCODE_G, SDL_SCANCODE_E, SDL_SCANCODE_RALT,   SDL_SCANCODE_A,         SDL_SCANCODE_S,            SDL_SCANCODE_W,
++    /* Col 7 */ SDL_SCANCODE_8, SDL_SCANCODE_L, SDL_SCANCODE_0, SDL_SCANCODE_SLASH, SDL_SCANCODE_RSHIFT, SDL_SCANCODE_RETURN, SDL_SCANCODE_GRAVE,      SDL_SCANCODE_EQUALS
++};
++
++/* AZERTY: the key at a QWERTY position carries another label; return the
++ * scancode of the QWERTY key with that label (oric-rpi: AzertyToQwerty). */
++static int fr_unmove(int sc) {
++    switch (sc) {
++    case SDL_SCANCODE_Q:         return SDL_SCANCODE_A;          /* key A -> a */
++    case SDL_SCANCODE_A:         return SDL_SCANCODE_Q;          /* key Q -> q */
++    case SDL_SCANCODE_W:         return SDL_SCANCODE_Z;          /* key Z -> z */
++    case SDL_SCANCODE_Z:         return SDL_SCANCODE_W;          /* key W -> w */
++    case SDL_SCANCODE_SEMICOLON: return SDL_SCANCODE_M;          /* key M -> m */
++    case SDL_SCANCODE_M:         return SDL_SCANCODE_COMMA;      /* key , -> , */
++    case SDL_SCANCODE_COMMA:     return SDL_SCANCODE_SEMICOLON;  /* key ; -> ; */
++    case SDL_SCANCODE_DELETE:    return SDL_SCANCODE_BACKSPACE;  /* Suppr = DEL */
++    case SDL_SCANCODE_NONUSHASH: return SDL_SCANCODE_BACKSLASH;  /* ISO key * of AZERTY */
++    case SDL_SCANCODE_KP_ENTER:  return SDL_SCANCODE_RETURN;
++    default:                     return sc;
++    }
++}
++
++static bool handle_fr(oric_keyboard_t* kb, const SDL_Event* event) {
++    if (event->type != SDL_KEYDOWN && event->type != SDL_KEYUP)
++        return false;   /* SDL_TEXTINPUT is not used */
++
++    int sc = fr_unmove((int)event->key.keysym.scancode);
++    bool down = (event->type == SDL_KEYDOWN);
++
++    for (int i = 0; i < 64; i++) {
++        if (fr_tab[i] != 0 && fr_tab[i] == sc) {
++            int col = i / 8;
++            int row = i % 8;
++            if (down) kb->matrix[col] &= ~(1 << row);
++            else      kb->matrix[col] |= (1 << row);
++            return true;
++        }
++    }
++    return false;
++}
++
+ /* ================================================================
+  * Public API
+  * ================================================================ */
+ 
+ bool oric_keyboard_handle_sdl_event(oric_keyboard_t* kb, const SDL_Event* event) {
++    if (kb->layout == ORIC_KB_FR)
++        return handle_fr(kb, event);
+     if (kb->layout == ORIC_KB_AZERTY)
+         return handle_symbolic(kb, event);
+     return handle_qwerty(kb, event);
+diff --git a/src/iomenu_glue.c b/src/iomenu_glue.c
+index f2b4783..bb45ebc 100644
+--- a/src/iomenu_glue.c
++++ b/src/iomenu_glue.c
+@@ -178,6 +178,7 @@ void iomenu_refresh(emulator_t* emu) {
+     st->joystick = emu->joystick.mode == ORIC_JOY_KEYBOARD ? IOM_JOY_KEYS
+                  : emu->joystick.mode == ORIC_JOY_SDL_GAMEPAD ? IOM_JOY_GAMEPAD : IOM_JOY_NONE;
+     st->azerty = emu->keyboard.layout == ORIC_KB_AZERTY;
++    st->kb_fr = emu->keyboard.layout == ORIC_KB_FR;
+ 
+     /* Expansion cards: list from the registry (cards.h), state of the running
+      * machine. The choices (cards page) are loaded when the menu opens. */
+@@ -378,9 +379,14 @@ bool iomenu_apply(emulator_t* emu, const iom_action_t* a) {
+         joystick_cycle(emu);
+         return false;
+     case IOM_ACT_KEYBOARD_TOGGLE: {
+-        const bool az = emu->keyboard.layout != ORIC_KB_AZERTY;
+-        oric_keyboard_set_layout(&emu->keyboard, az ? ORIC_KB_AZERTY : ORIC_KB_QWERTY);
+-        msg(emu, false, "Clavier %s", az ? "AZERTY" : "QWERTY");
++        /* QWERTY -> AZERTY (by character) -> AZERTY by position -> QWERTY */
++        const oric_kb_layout_t l = emu->keyboard.layout;
++        const oric_kb_layout_t n = l == ORIC_KB_QWERTY ? ORIC_KB_AZERTY
++                                 : l == ORIC_KB_AZERTY ? ORIC_KB_FR : ORIC_KB_QWERTY;
++        oric_keyboard_release_all(&emu->keyboard);
++        oric_keyboard_set_layout(&emu->keyboard, n);
++        msg(emu, false, "Clavier %s", n == ORIC_KB_FR ? "AZERTY positionnel"
++                                     : n == ORIC_KB_AZERTY ? "AZERTY" : "QWERTY");
+         return false;
+     }
+     case IOM_ACT_LANG_TOGGLE:
+@@ -480,7 +486,8 @@ bool iomenu_config_save(emulator_t* emu, const char* path) {
+     if (pr && emu->printer.filename) fprintf(out, "imprimante_fichier=%s\n", emu->printer.filename);
+     fprintf(out, "joystick=%s\n", emu->joystick.mode == ORIC_JOY_KEYBOARD ? "clavier"
+                                 : emu->joystick.mode == ORIC_JOY_SDL_GAMEPAD ? "manette" : "aucun");
+-    fprintf(out, "clavier=%s\n", emu->keyboard.layout == ORIC_KB_AZERTY ? "azerty" : "qwerty");
++    fprintf(out, "clavier=%s\n", emu->keyboard.layout == ORIC_KB_AZERTY ? "azerty"
++                               : emu->keyboard.layout == ORIC_KB_FR ? "fr" : "qwerty");
+     fprintf(out, "langue=%s\n", iom_lang_code(iom_lang()));
+     bool ok = fclose(out) == 0;
+ #ifdef _WIN32
+@@ -547,6 +554,7 @@ int iomenu_config_load(const char* path, cli_opts_t* cfg) {
+             if (!cfg->joystick_mode && strcasecmp(val, "manette") == 0) { cfg->joystick_mode = "gamepad"; applied++; }
+         } else if (strcmp(key, "clavier") == 0) {
+             if (!cfg->keyboard_layout && strcasecmp(val, "azerty") == 0) { cfg->keyboard_layout = "azerty"; applied++; }
++            if (!cfg->keyboard_layout && strcasecmp(val, "fr") == 0) { cfg->keyboard_layout = "fr"; applied++; }
+         } else if (strcmp(key, "langue") == 0) {
+             iom_lang_t lang;
+             if (iom_lang_parse(val, &lang)) { iom_lang_set(lang); applied++; }
+diff --git a/src/main.c b/src/main.c
+index 75e6ecc..6a25644 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -2830,6 +2830,9 @@ static int main_setup_input_printer(emulator_t* emu, cli_opts_t* cfg) {
+     if (cfg->keyboard_layout && strcasecmp(cfg->keyboard_layout, "azerty") == 0) {
+         oric_keyboard_set_layout(&emu->keyboard, ORIC_KB_AZERTY);
+         log_info("Keyboard layout: AZERTY");
++    } else if (cfg->keyboard_layout && strcasecmp(cfg->keyboard_layout, "fr") == 0) {
++        oric_keyboard_set_layout(&emu->keyboard, ORIC_KB_FR);
++        log_info("Keyboard layout: FR (positional AZERTY)");
+     } else {
+         log_info("Keyboard layout: QWERTY");
+     }
+diff --git a/src/video/iomenu.c b/src/video/iomenu.c
+index 1075ab6..849b4d9 100644
+--- a/src/video/iomenu.c
++++ b/src/video/iomenu.c
+@@ -712,7 +712,7 @@ static void draw_devices(const iom_menu_t* m, iom_surface_t* s) {
+         state(s, 30, 19, st->joystick != IOM_JOY_NONE, jo[st->joystick], &rj);
+         iom_puts(s, 30, 43, "Clavier", rk.acc, -1);
+         s_putc(s, 30, 53, IOM_DOT, rk.ok);
+-        iom_puts(s, 30, 55, st->azerty ? "AZERTY" : "QWERTY", rk.ok, -1);
++        iom_puts(s, 30, 55, st->kb_fr ? "AZERTY pos." : st->azerty ? "AZERTY" : "QWERTY", rk.ok, -1);
+     }
+     {   /* Cassette: loading mode at startup (-f), taken into account at the
+          * next start (phosphoric.cfg) */
+diff --git a/tests/unit/test_iomenu_glue.c b/tests/unit/test_iomenu_glue.c
+index f5b5373..6699d52 100644
+--- a/tests/unit/test_iomenu_glue.c
++++ b/tests/unit/test_iomenu_glue.c
+@@ -193,6 +193,8 @@ TEST(test_apply_toggles) {
+     iomenu_apply(emu, &a);
+     ASSERT_EQ(emu->keyboard.layout, ORIC_KB_AZERTY);
+     iomenu_apply(emu, &a);
++    ASSERT_EQ(emu->keyboard.layout, ORIC_KB_FR);
++    iomenu_apply(emu, &a);
+     ASSERT_EQ(emu->keyboard.layout, ORIC_KB_QWERTY);
+     a.type = IOM_ACT_JOYSTICK_CYCLE;
+     iomenu_apply(emu, &a);
+diff --git a/tests/unit/test_keyboard.c b/tests/unit/test_keyboard.c
+index 12a783d..39cdde5 100644
+--- a/tests/unit/test_keyboard.c
++++ b/tests/unit/test_keyboard.c
+@@ -602,6 +602,66 @@ TEST(test_modifier_release_all_clears) {
+     }
+ }
+ 
++/* ═══ FR positional layout (-k fr) ═══ */
++
++/* key at (col,row) pressed after a KEYDOWN of scancode sc, released after KEYUP */
++static int fr_check(SDL_Scancode sc, int col, int row) {
++    oric_keyboard_t kb;
++    oric_keyboard_init(&kb);
++    oric_keyboard_set_layout(&kb, ORIC_KB_FR);
++    SDL_Event d = make_keydown(SDLK_UNKNOWN, sc);
++    if (!oric_keyboard_handle_sdl_event(&kb, &d)) return 0;
++    for (int c = 0; c < 8; c++) {
++        uint8_t want = c == col ? (uint8_t)~(1 << row) : 0xFF;
++        if (kb.matrix[c] != want) return 0;
++    }
++    SDL_Event u = make_keyup(SDLK_UNKNOWN, sc);
++    oric_keyboard_handle_sdl_event(&kb, &u);
++    for (int c = 0; c < 8; c++) if (kb.matrix[c] != 0xFF) return 0;
++    return 1;
++}
++
++TEST(test_fr_letters_by_label) {
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_Q, 6, 5));          /* AZERTY key A -> A */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_A, 1, 6));          /* AZERTY key Q -> Q */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_W, 2, 5));          /* AZERTY key Z -> Z */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_Z, 6, 7));          /* AZERTY key W -> W */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_SEMICOLON, 2, 0));  /* AZERTY key M -> M */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_M, 4, 1));          /* AZERTY key , -> , */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_COMMA, 3, 2));      /* AZERTY key ; -> ; */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_E, 6, 3));          /* unmoved letter */
++}
++
++TEST(test_fr_digits_without_shift) {
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_1, 0, 5));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_7, 0, 0));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_0, 7, 2));
++}
++
++TEST(test_fr_specials_and_modifiers) {
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_DELETE, 5, 5));     /* Suppr = DEL */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_BACKSPACE, 5, 5));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_RETURN, 7, 5));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_ESCAPE, 1, 5));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_LSHIFT, 4, 4));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_RSHIFT, 7, 4));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_LCTRL, 2, 4));
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_LALT, 5, 4));       /* Alt = FUNCT */
++    ASSERT_TRUE(fr_check(SDL_SCANCODE_UP, 4, 3));
++}
++
++TEST(test_fr_ignores_textinput) {
++    oric_keyboard_t kb;
++    oric_keyboard_init(&kb);
++    oric_keyboard_set_layout(&kb, ORIC_KB_FR);
++    SDL_Event ev;
++    memset(&ev, 0, sizeof(ev));
++    ev.type = SDL_TEXTINPUT;
++    ev.text.text[0] = 'a';
++    ASSERT_TRUE(!oric_keyboard_handle_sdl_event(&kb, &ev));
++    for (int c = 0; c < 8; c++) ASSERT_EQ(kb.matrix[c], 0xFF);
++}
++
+ /* ═══════════════════════════════════════════════════════════════ */
+ 
+ int main(void) {
+@@ -612,6 +672,12 @@ int main(void) {
+     RUN(test_keyboard_init);
+     RUN(test_keyboard_reset_preserves_layout);
+ 
++    printf("\n  FR positional layout:\n");
++    RUN(test_fr_letters_by_label);
++    RUN(test_fr_digits_without_shift);
++    RUN(test_fr_specials_and_modifiers);
++    RUN(test_fr_ignores_textinput);
++
+     printf("\n  press_char API:\n");
+     RUN(test_press_char_letter_A);
+     RUN(test_press_char_letter_lowercase);
+-- 
+2.43.0
+

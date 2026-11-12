@@ -1,0 +1,128 @@
+From 010057510cb596757efff21ea9a96ec3a9396eb8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 09:02:27 +0100
+Subject: [PATCH 08/11] =?UTF-8?q?picowifi=20:=20+++=20reconnu=20apr=C3=A8s?=
+ =?UTF-8?q?=20une=20seconde=20de=20silence=20(garde=20en=20temps,=20comme?=
+ =?UTF-8?q?=20un=20modem=20Hayes)=20;=20reprise=20du=20port=20oric-rpi?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/io/serial_picowifi.c   | 32 +++++++++++++++++++++++++++++++-
+ tests/unit/test_picowifi.c | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 64 insertions(+), 1 deletion(-)
+
+diff --git a/src/io/serial_picowifi.c b/src/io/serial_picowifi.c
+index 6f9ff0b..5a750f7 100644
+--- a/src/io/serial_picowifi.c
++++ b/src/io/serial_picowifi.c
+@@ -182,6 +182,7 @@ typedef struct {
+     /* ── +++ escape (guard-timed, S2 char) ── */
+     int      plus_count;
+     int64_t  silence;               /* poll-based silence counter */
++    int64_t  last_tx_ms;            /* time of the last byte sent (guard time) */
+ 
+     /* ── WiFi configuration / state ── */
+     char     ssid[64];
+@@ -2189,16 +2190,45 @@ static void picowifi_close(serial_backend_t* self)
+     log_info("PicoWiFi: backend closed");
+ }
+ 
++/* Monotonic clock in ms, for the +++ guard time. The emulator runs at the
++ * Oric's pace (50 Hz), so host time is the Oric's time. */
++static int64_t pw_now_ms(void)
++{
++#if defined(__EMSCRIPTEN__)
++    return (int64_t)emscripten_get_now();
++#elif defined(_WIN32)
++    return (int64_t)GetTickCount64();
++#else
++    struct timespec ts;
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++#endif
++}
++
++#define PW_ESC_GUARD_MS 1000        /* S12 = 50 (1/50 s): 1 s */
++
+ static bool picowifi_send(serial_backend_t* self, uint8_t byte)
+ {
+     picowifi_t* pw = (picowifi_t*)self->state.picowifi.impl;
++    const int64_t now = pw_now_ms();
++    const int64_t since_tx = now - pw->last_tx_ms;
++    pw->last_tx_ms = now;
+ 
+     /* ── Data mode ── */
+     if (pw->mode == 1) {
+         /* +++ escape with guard time (escape char is S2-configurable;
+          * values >= 128 disable the escape per firmware). Real 1 s guard
+          * timing is sprint 47; this is a poll-count approximation. */
+-        if (pw->esc_char < 128 && (int)byte == pw->esc_char && pw->silence >= 50) {
++        /* The silence counter only moves when the ACIA calls recv, which it
++         * does only when a byte has arrived: on a quiet line it never reached
++         * 50 and « +++ » was never recognised (CP/A REMOTE OFF; oric-rpi
++         * port, docs/phosphoric-f8.md point 5). As a Hayes modem / the Pico
++         * W: one second without sending before the first « + », then the
++         * others less than a second apart. */
++        const bool guard_ok = pw->plus_count == 0
++            ? (since_tx >= PW_ESC_GUARD_MS || pw->silence >= 50)
++            : (since_tx < PW_ESC_GUARD_MS || pw->silence >= 50);
++        if (pw->esc_char < 128 && (int)byte == pw->esc_char && guard_ok) {
+             pw->plus_count++;
+             if (pw->plus_count >= 3) {
+                 pw->mode = 0;
+diff --git a/tests/unit/test_picowifi.c b/tests/unit/test_picowifi.c
+index 0540563..127eb4d 100644
+--- a/tests/unit/test_picowifi.c
++++ b/tests/unit/test_picowifi.c
+@@ -970,6 +970,37 @@ TEST(test_plus_plus_plus_escape) {
+     tn_disconnect();
+ }
+ 
++TEST(test_plus_plus_plus_quiet_line) {
++    /* Quiet line, as CP/A's REMOTE OFF: one second without sending, then
++     * « +++ » in a row with no recv in between (the ACIA only calls recv when
++     * a byte has arrived). Hayes guard time, not a recv count. */
++    tn_connect("-");
++    ASSERT_TRUE(pw->connected(pw));
++    struct timespec ts = { 1, 100000000 };   /* 1.1 s */
++    nanosleep(&ts, NULL);
++    pw->send(pw, '+');
++    pw->send(pw, '+');
++    pw->send(pw, '+');
++    ASSERT_FALSE(pw->connected(pw));     /* command mode */
++    uint8_t b;
++    for (int i = 0; i < 40; i++) pw->recv(pw, &b);   /* drain the OK */
++    char r[256];
++    pw_cmd("ATO", r, sizeof(r));
++    ASSERT_CONTAINS(r, "CONNECT");
++    tn_disconnect();
++}
++
++TEST(test_plus_in_data_no_escape) {
++    /* « + » right after other data is data, not an escape. */
++    tn_connect("-");
++    pw->send(pw, 'a');
++    pw->send(pw, '+');
++    pw->send(pw, '+');
++    pw->send(pw, '+');
++    ASSERT_TRUE(pw->connected(pw));
++    tn_disconnect();
++}
++
+ TEST(test_atrd_in_call_errors) {
+     /* ATRD while a call is up → ERROR (firmware refuses). */
+     tn_connect("-");
+@@ -1319,6 +1350,8 @@ int main(void) {
+     RUN(test_dial_host_starting_with_p);
+     RUN(test_dial_uppercase_modifier_keeps_host);
+     RUN(test_plus_plus_plus_escape);
++    RUN(test_plus_plus_plus_quiet_line);
++    RUN(test_plus_in_data_no_escape);
+     RUN(test_atrd_in_call_errors);
+ 
+     /* Sprint 49 — NVRAM persistence + boot */
+-- 
+2.43.0
+

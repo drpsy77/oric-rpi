@@ -1,0 +1,58 @@
+PHOSPHORIC POUR WINDOWS - avec les améliorations du port oric-rpi
+=================================================================
+
+Phosphoric 2.31.15 (bmarty), commit acfeacc, plus les patchs du dépôt
+oric-rpi (bureau/patches/). Windows 10/11, 64 bits. Rien à installer :
+décompresser le dossier où l'on veut.
+
+LANCER
+------
+  Oric.bat             BASIC 1.1 seul
+  Oric-LOCI.bat        cartouche LOCI : menu (flèches, Espace, Échap)
+  Oric-LOCI-modem.bat  LOCI + modem Wi-Fi (console à distance de CP/A)
+  Oric-CPA.bat         CP/A directement : copier d'abord cpa-en.dsk dans loci\
+
+Dossiers de LOCI : loci\ = mémoire flash « 0: » (locirom, basic11b.rom,
+microdis.rom, et les disquettes de démarrage comme cpa-en.dsk) ;
+usb\ = clé USB « 1: » (« 2: » avec le modem) pour les .dsk et .tap.
+Les ROM de l'Oric ne sont pas libres : celles du dossier loci\ sont les
+vôtres, ne pas redistribuer ce dossier tel quel.
+
+Touches : F1 menu des périphériques, F5 reset (Maj+F5 NMI), F8 bouton
+Action de LOCI, F11 plein écran, F3 taille de la fenêtre, F10 quitter.
+
+CE QUI VIENT DU PORT ORIC-RPI
+-----------------------------
+-k fr                 clavier AZERTY par position, comme sur la Pi
+                      (keymap=FR) : chiffres sans Maj, lettres à leur place,
+                      ù -> ;   * -> '   ; -> .   : -> /   ² et ! -> \
+                      Suppr = DEL, Alt = FUNCT.
+                      Dans le menu F1, « Clavier » passe QWERTY -> AZERTY
+                      (par caractère, celui de Phosphoric) -> AZERTY pos.
+--kma azerty.kma      avec -k fr : correspondance d'Oricutron (modifiable),
+                      comme clavier=oric/azerty.kma sur la Pi.
+--pixels tv|square    points 1,23 fois plus larges que hauts (téléviseur
+                      PAL) ou carrés, proportions gardées
+--colors tv|pure      couleurs d'un téléviseur (celles de cpa-oric)
+--saturation N --brightness N   en %, défaut 100
+--color rouge=FF2A1A  une couleur imposée (noir rouge vert jaune bleu
+                      magenta cyan blanc, ou en anglais)
+--loci-disk 0:/x.dsk  démarre sur une image en A: de LOCI, sans le menu
+--serial-no-cadence   ACIA sans cadence de 9600 bauds (comme le vrai LOCI)
+--serial-rx-backpressure   file pleine : l'octet reste dans le modem
+--serial-buffer 256   file de réception de l'ACIA
+Modem picowifi        disponible sous Windows (Winsock) ; « +++ » reconnu
+                      après une seconde de silence (REMOTE OFF de CP/A).
+Cassette              plus d'interception de CSAVE/CLOAD quand la ROM BASIC
+                      est cachée (CP/A : HEX, LOGO).
+
+LIMITES CONNUES
+---------------
+- Disquettes servies par LOCI (format MFM, comme celles de CP/A) : les
+  écritures ne sont pas réécrites dans le fichier .dsk (Phosphoric : « writes
+  are session-only »). Le port Pi le fait (disquette.c), pas encore ici.
+- Pas de transports série tcp/pty/com sous Windows (seuls loopback, file:
+  et picowifi).
+
+Sources : https://github.com/drpsy77/oric-rpi (dossier bureau/),
+https://github.com/benedictemarty/Phosphoric. Licence EUPL-1.2.

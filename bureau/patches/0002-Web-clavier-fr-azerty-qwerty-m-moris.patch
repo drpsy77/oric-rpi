@@ -1,0 +1,34 @@
+From 6d85b4b8a12ac763fe93591adaf1042abb826c91 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 08:51:39 +0100
+Subject: [PATCH 02/11] =?UTF-8?q?Web=20:=20=3Fclavier=3Dfr|azerty|qwerty?=
+ =?UTF-8?q?=20(m=C3=A9moris=C3=A9)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ web/shell.js | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/web/shell.js b/web/shell.js
+index 2fa0b0e..7a9b388 100644
+--- a/web/shell.js
++++ b/web/shell.js
+@@ -71,6 +71,13 @@ if (modem) args.push('--serial', 'picowifi:Web:web');
+ // without it the echo « ATZ\r\r\nOK » overflows and ProphetOric concludes « no modem ».
+ // A bare 6551 ($031C, without LOCI) has no FIFO: nothing added.
+ if (modem && loci) args.push('--serial-buffer', '32');
++// ── Keyboard layout (?clavier=fr|azerty|qwerty, remembered) ───────────────
++// fr = French AZERTY keyboard read by key position (-k fr): digits without
++// Shift, letters by their label; azerty = by character (-k azerty).
++var urlKbd = new URLSearchParams(location.search).get('clavier');
++if (urlKbd) { try{ localStorage.setItem('phos_clavier', urlKbd); }catch(e){} }
++var kbdLayout = urlKbd || (function(){ try{ return localStorage.getItem('phos_clavier'); }catch(e){ return null; } })() || '';
++if (kbdLayout === 'fr' || kbdLayout === 'azerty') args.push('-k', kbdLayout);
+ // Extra CLI arguments (e2e tests: --type-keys…), set in
+ // sessionStorage 'phos_extra_args' (JSON array) before loading.
+ try{ var extraArgs=JSON.parse(sessionStorage.getItem('phos_extra_args')||'[]');
+-- 
+2.43.0
+

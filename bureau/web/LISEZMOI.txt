@@ -1,0 +1,22 @@
+PHOSPHORIC POUR LE NAVIGATEUR - avec les améliorations du port oric-rpi
+======================================================================
+
+Lancer : sh lancer.sh (Linux, Mac, RPI) ou lancer.bat (Windows, Python
+installé), puis ouvrir http://localhost:8000/ . Le navigateur refuse le
+.wasm ouvert directement (file://) : il faut un serveur HTTP.
+
+index.html ouvre phosphoric.html?clavier=fr&pixels=tele&couleurs=tele .
+
+Réglages dans l'adresse (mémorisés par le navigateur) :
+  clavier=fr|azerty|qwerty   fr = AZERTY par position, comme sur la Pi
+  pixels=tele|carres         forme des points
+  couleurs=tele|pures        couleurs d'un téléviseur
+  saturation=N, luminosite=N en %
+  loci=1, modem=1            cartouche LOCI, modem Wi-Fi ; avec les deux :
+                             ACIA sans cadence, file de 256, contre-pression
+                             (modemcadence=1 : comportement d'origine)
+Le reste (media=, rom=, relay=…) : docs/wasm.md de Phosphoric.
+
+Le fichier phosphoric.data contient les ROM de l'Oric (basic11b.rom,
+microdis.rom) : elles ne sont pas libres, ne pas publier ce dossier tel
+quel sur un site.

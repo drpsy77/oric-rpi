@@ -1,0 +1,175 @@
+From 2b5ee22d3d1dca7d4ba3ebb989f2a3dbdf663168 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 08:58:22 +0100
+Subject: [PATCH 05/11] =?UTF-8?q?ACIA=20:=20--serial-rx-backpressure=20et?=
+ =?UTF-8?q?=20--serial-no-cadence=20(ACIA=20du=20firmware=20LOCI),=20d?=
+ =?UTF-8?q?=C3=A9fauts=20du=20web=20avec=20LOCI=20+=20modem=20;=20reprise?=
+ =?UTF-8?q?=20du=20port=20oric-rpi?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ include/io/acia6551.h |  9 +++++++++
+ src/cards/card_acia.c | 19 +++++++++++++++++--
+ src/io/acia6551.c     | 15 ++++++++++++---
+ web/shell.js          |  9 ++++++++-
+ 4 files changed, 46 insertions(+), 6 deletions(-)
+
+diff --git a/include/io/acia6551.h b/include/io/acia6551.h
+index 2df026a..752a49b 100644
+--- a/include/io/acia6551.h
++++ b/include/io/acia6551.h
+@@ -214,6 +214,12 @@ typedef struct acia6551_s {
+     uint32_t ext_clock_baud;
+     bool    ext_clock_warned;   /**< Instant-transfer warning already emitted */
+ 
++    /* No baud-rate cadence (--serial-no-cadence): whatever the control
++     * register says, bytes move as with the instant transfer of baud index 0.
++     * Models the ACIA of the LOCI cartridge, which lives in its firmware and
++     * talks to the modem over USB: no 9600-baud limit there (oric-rpi port). */
++    bool    no_cadence;
++
+     /* Serial trace / debug dump (--serial-trace FILE) */
+     FILE*   trace_file;         /**< Trace output file (NULL = disabled) */
+     uint64_t trace_cycle;       /**< Current CPU cycle for timestamping */
+@@ -355,6 +361,9 @@ void acia_set_rx_backpressure(acia6551_t* acia, bool enabled);
+  */
+ void acia_set_ext_clock_baud(acia6551_t* acia, uint32_t baud);
+ 
++/** No baud-rate cadence: instant transfer whatever the control register. */
++void acia_set_no_cadence(acia6551_t* acia, bool enabled);
++
+ /**
+  * @brief Enable serial trace logging to file
+  *
+diff --git a/src/cards/card_acia.c b/src/cards/card_acia.c
+index 3bded5a..02cca00 100644
+--- a/src/cards/card_acia.c
++++ b/src/cards/card_acia.c
+@@ -42,6 +42,8 @@ typedef struct {
+     bool        tcp_backpressure;  /* --serial-tcp-backpressure[=N] */
+     int         tcp_rcvbuf;        /* explicit N (0: auto) */
+     long        loci_irq_latency_us; /* --loci-irq-latency US */
++    bool        rx_backpressure;   /* --serial-rx-backpressure (any backend) */
++    bool        no_cadence;        /* --serial-no-cadence */
+ } acia_cfg_t;
+ 
+ #define C ((acia_cfg_t*)p)
+@@ -66,6 +68,8 @@ static void opt_irq_latency(void* p, const char* arg) {
+     if (C->loci_irq_latency_us < 0) C->loci_irq_latency_us = 0;
+ }
+ static void opt_addr(void* p, const char* arg) { C->addr = arg; }
++static void opt_rx_bp(void* p, const char* arg) { (void)arg; C->rx_backpressure = true; }
++static void opt_no_cadence(void* p, const char* arg) { (void)arg; C->no_cadence = true; }
+ #undef C
+ 
+ /* Same order as the old getopt table (identical ambiguous prefixes). */
+@@ -77,6 +81,8 @@ static const card_opt_t k_opts[] = {
+     { "serial-irq-on-rdrf",      no_argument,       opt_irq_rdrf },
+     { "serial-trace",            required_argument, opt_trace },
+     { "serial-tcp-backpressure", optional_argument, opt_backpressure },
++    { "serial-rx-backpressure",  no_argument,       opt_rx_bp },
++    { "serial-no-cadence",       no_argument,       opt_no_cadence },
+     { "loci-irq-latency",        required_argument, opt_irq_latency },
+     { "acia-addr",               required_argument, opt_addr },
+ };
+@@ -96,6 +102,11 @@ static const char k_help_serial[] =
+     "      --serial-tcp-backpressure[=N]  Bounded RX for tcp:: stop draining the socket\n"
+     "                            when the RX FIFO is full + cap kernel SO_RCVBUF to N\n"
+     "                            bytes (default N=FIFO size or 512) → real TCP flow control\n"
++    "      --serial-rx-backpressure  RX FIFO full: leave the byte in the backend (any\n"
++    "                            backend, e.g. picowifi), like the LOCI firmware, which\n"
++    "                            only takes from the modem what the Oric has read\n"
++    "      --serial-no-cadence   No baud-rate cadence: instant transfer whatever the\n"
++    "                            control register (ACIA of the LOCI firmware, USB modem)\n"
+     "      --loci-irq-latency US LOCI I2C IRQ transport cost: defer each ACIA /IRQ\n"
+     "                            by US microseconds (e.g. 10000 → ~100 B/s IRQ-driven\n"
+     "                            RX cap; polling stays fast). LOCI-context only.\n";
+@@ -391,9 +402,13 @@ static int setup(emulator_t* emu, const void* p, const struct cli_opts_s* core)
+                     }
+                     acia_set_irq_latency(&emu->acia, cyc);
+                 }
+-                if (c->tcp_backpressure && sb->type == SERIAL_BACKEND_TCP) {
++                if ((c->tcp_backpressure && sb->type == SERIAL_BACKEND_TCP) ||
++                    c->rx_backpressure) {
+                     acia_set_rx_backpressure(&emu->acia, true);
+                 }
++                if (c->no_cadence) {
++                    acia_set_no_cadence(&emu->acia, true);
++                }
+                 if (c->trace_file) {
+                     acia_set_trace(&emu->acia, c->trace_file);
+                 }
+@@ -421,7 +436,7 @@ static void teardown(emulator_t* emu) {
+ 
+ const card_module_t card_acia = {
+     .descs = k_descs, .ndescs = 1, .desc_before = "dtl2000",
+-    .opts = k_opts, .nopts = 9, .opts_before = "dtl2000",
++    .opts = k_opts, .nopts = sizeof(k_opts) / sizeof(k_opts[0]), .opts_before = "dtl2000",
+     .helps = k_helps, .nhelps = 2,
+     .cfg_size = sizeof(acia_cfg_t),
+     .init = init, .stage = CARD_STAGE_SERIAL, .setup = setup, .teardown = teardown,
+diff --git a/src/io/acia6551.c b/src/io/acia6551.c
+index 86bbc5c..ccfed0d 100644
+--- a/src/io/acia6551.c
++++ b/src/io/acia6551.c
+@@ -254,8 +254,8 @@ static void acia_update_timing(acia6551_t* acia)
+         acia->tx_reload = cycles_per_byte(ACIA_V23_TX_BAUD, acia->framebits);
+     } else {
+         int baud_idx = acia->control & ACIA_CTL_BAUD_MASK;
+-        int baud = baud_rate_table[baud_idx];
+-        if (baud == 0 && acia->ext_clock_baud > 0) {
++        int baud = acia->no_cadence ? 0 : baud_rate_table[baud_idx];
++        if (baud == 0 && acia->ext_clock_baud > 0 && !acia->no_cadence) {
+             /* External clock selected, but the user asked for a realistic
+              * cadence (--serial-baud) instead of instant transfer. */
+             baud = (int)acia->ext_clock_baud;
+@@ -263,7 +263,7 @@ static void acia_update_timing(acia6551_t* acia)
+         acia->baud_rate = (uint32_t)baud;
+         acia->rx_reload = cycles_per_byte(baud, acia->framebits);
+         acia->tx_reload = cycles_per_byte(baud, acia->framebits);
+-        if (baud == 0 && !acia->ext_clock_warned) {
++        if (baud == 0 && !acia->ext_clock_warned && !acia->no_cadence) {
+             log_warning("ACIA: baud rate 0 (external clock) — using instant transfer "
+                         "(set --serial-baud N for realistic timing)");
+             acia->ext_clock_warned = true;
+@@ -652,6 +652,15 @@ void acia_set_rx_backpressure(acia6551_t* acia, bool enabled)
+     }
+ }
+ 
++void acia_set_no_cadence(acia6551_t* acia, bool enabled)
++{
++    acia->no_cadence = enabled;
++    acia_update_timing(acia);
++    if (enabled) {
++        log_info("ACIA: no baud-rate cadence (instant transfer, like the LOCI firmware ACIA)");
++    }
++}
++
+ void acia_set_ext_clock_baud(acia6551_t* acia, uint32_t baud)
+ {
+     acia->ext_clock_baud = baud;
+diff --git a/web/shell.js b/web/shell.js
+index cf382f7..a275cd1 100644
+--- a/web/shell.js
++++ b/web/shell.js
+@@ -70,7 +70,14 @@ if (modem) args.push('--serial', 'picowifi:Web:web');
+ // RX ring in front of it (loci-firmware src/mia/oric/acia.c, ACIA_RX_BUFFER_SIZE):
+ // without it the echo « ATZ\r\r\nOK » overflows and ProphetOric concludes « no modem ».
+ // A bare 6551 ($031C, without LOCI) has no FIFO: nothing added.
+-if (modem && loci) args.push('--serial-buffer', '32');
++// The real LOCI only takes from the modem what the Oric has read, and its ACIA
++// (in the firmware, modem on USB) has no 9600-baud cadence: 256-byte FIFO,
++// backpressure and no cadence, as on the oric-rpi port (CP/A remote console).
++// ?modemcadence=1 keeps the former behaviour (32-byte ring, 9600 bauds).
++var modemCadence = new URLSearchParams(location.search).get('modemcadence') === '1';
++if (modem && loci && modemCadence) args.push('--serial-buffer', '32');
++if (modem && loci && !modemCadence)
++  args.push('--serial-buffer', '256', '--serial-rx-backpressure', '--serial-no-cadence');
+ // ── Keyboard layout (?clavier=fr|azerty|qwerty, remembered) ───────────────
+ // fr = French AZERTY keyboard read by key position (-k fr): digits without
+ // Shift, letters by their label; azerty = by character (-k azerty).
+-- 
+2.43.0
+

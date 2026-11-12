@@ -1,0 +1,33 @@
+# azerty.kma : clavier AZERTY -> touches de l'Oric (format d'Oricutron).
+# clavier=oric/azerty.kma dans cmdline.txt ou oric.cfg (avec keymap=FR).
+# Une ligne : code de la touche du PC : code de la touche de l'Oric.
+# Codes de SDL 1 : le signe de la touche sans MAJ (ASCII, ou Latin-1 :
+# 249 u grave, 178 carre, 224 a grave...) ; Oric : son clavier QWERTY.
+# Une touche absente garde sa place. Les refus vont dans oric/journal.txt.
+97 : 97
+113 : 113
+122 : 122
+119 : 119
+109 : 109
+44 : 44
+38 : 49
+233 : 50
+34 : 51
+39 : 52
+40 : 53
+45 : 54
+232 : 55
+95 : 56
+231 : 57
+224 : 48
+41 : 45
+61 : 61
+94 : 91
+36 : 93
+249 : 59
+42 : 39
+59 : 46
+58 : 47
+33 : 92
+178 : 92
+60 : 92

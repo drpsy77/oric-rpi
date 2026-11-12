@@ -1,0 +1,33 @@
+From 5c2316b65aec0c8ae4e11fe213696e333910c24c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 09:03:59 +0100
+Subject: [PATCH 10/11] Cassette : interceptions seulement si la ROM BASIC est
+ visible (CP/A sous ROMDIS), comme Oricutron ; reprise du port oric-rpi
+
+---
+ src/io/tape_patches.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/io/tape_patches.c b/src/io/tape_patches.c
+index 3b3988a..263fc0f 100644
+--- a/src/io/tape_patches.c
++++ b/src/io/tape_patches.c
+@@ -38,6 +38,15 @@ void tape_patches(emulator_t* emu) {
+     if (emu->tape_capture.active)
+         return;
+ 
++    /* Only while the BASIC ROM is visible, as Oricutron (tape.c, inside
++     * `if (oric->romon)`). Under ROMDIS (Microdisc, integrated LOCI), the
++     * overlay RAM code that goes through one of these addresses is not
++     * BASIC: CP/A's direct read (BDOS 33) passes $E75A and was taken for a
++     * CSAVE, ending in an RTI on a foreign stack (HEX shows zeros, LOGO stops
++     * on *BRK*). oric-rpi port, docs/phosphoric-f8.md point 6. */
++    if (emu->memory.basic_rom_disabled || !emu->memory.rom_enabled)
++        return;
++
+     /* LOCI co-sim (--loci-emu): the ROM is SERVED by the firmware (BASIC 1.0 or
+      * 1.1, chosen from the menu) and the top of memory may be overlay RAM
+      * (Sedoric). PC-based hooks cannot know what is executing at these addresses:
+-- 
+2.43.0
+

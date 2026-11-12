@@ -1,0 +1,533 @@
+From 65c6f10665e9b1592644cee748b8411dfd5f56a9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 08:55:41 +0100
+Subject: [PATCH 04/11] =?UTF-8?q?Affichage=20:=20points=20et=20couleurs=20?=
+ =?UTF-8?q?d'un=20t=C3=A9l=C3=A9viseur=20(--pixels,=20--colors,=20--satura?=
+ =?UTF-8?q?tion,=20--brightness,=20--color),=20reprise=20du=20port=20oric-?=
+ =?UTF-8?q?rpi?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ Makefile                         |  3 +-
+ include/cli/cli_options.h        |  7 ++-
+ include/cli/cli_opts.h           |  2 +
+ include/video/renderer_display.h | 57 ++++++++++++++++++++
+ src/cli/cli_args.c               | 32 +++++++++++
+ src/cli/cli_opts.c               |  1 +
+ src/cli/cli_usage.c              |  5 ++
+ src/main.c                       |  2 +
+ src/video/renderer.c             | 90 +++++++++++++++++++++++++++++--
+ src/video/renderer_display.c     | 91 ++++++++++++++++++++++++++++++++
+ web/shell.html                   |  2 +
+ web/shell.js                     | 12 +++++
+ 12 files changed, 299 insertions(+), 5 deletions(-)
+ create mode 100644 include/video/renderer_display.h
+ create mode 100644 src/video/renderer_display.c
+
+diff --git a/Makefile b/Makefile
+index 37cddbf..c95d82f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -218,6 +218,7 @@ SOURCES = src/main.c \
+           src/video/avi_recorder.c \
+           src/video/stb_image_write_impl.c \
+           src/video/renderer.c \
++          src/video/renderer_display.c \
+           src/video/osd.c \
+           src/video/iomenu.c \
+           src/video/iom_lang.c \
+@@ -573,7 +574,7 @@ TEST_MEA8000_SRCS = tests/unit/test_mea8000.c src/io/mea8000.c
+ 
+ $(eval $(call UNIT_TEST,test-mea8000,test_mea8000,$(TEST_MEA8000_SRCS),-lm,))
+ 
+-TEST_RENDERER_SRCS = tests/support/loci_emu_stub.c tests/unit/test_renderer.c src/video/video.c src/video/renderer.c \
++TEST_RENDERER_SRCS = tests/support/loci_emu_stub.c tests/unit/test_renderer.c src/video/video.c src/video/renderer.c src/video/renderer_display.c \
+                      src/io/ula_ng.c \
+                      $(MEM_SRCS) src/utils/logging.c
+ 
+diff --git a/include/cli/cli_options.h b/include/cli/cli_options.h
+index 97f3b28..6b98175 100644
+--- a/include/cli/cli_options.h
++++ b/include/cli/cli_options.h
+@@ -42,7 +42,7 @@ enum {
+     OPT_TYPE_KEYS_WHEN, OPT_POKE_AT, OPT_POKE_WHEN, OPT_TAPE_OUT_CAPTURE,
+     OPT_DISK_WEB, OPT_LOCI_WEB, OPT_LOCI_WEB_BASE, OPT_JASMIN_ROM,
+     OPT_CONFIG, OPT_NO_CONFIG, OPT_MENU_SCREENSHOT, OPT_GDB_BIND, OPT_NO_CONFIG_CARDS, OPT_NO_ROM,
+-    OPT_NO_AUTO_LOCI
++    OPT_NO_AUTO_LOCI, OPT_PIXELS, OPT_COLORS, OPT_SATURATION, OPT_BRIGHTNESS, OPT_COLOR
+ };
+ 
+ /* Short option string passed to getopt_long. */
+@@ -111,6 +111,11 @@ static const struct option long_options[] = {
+     {"scale",               required_argument, 0, OPT_SCALE},
+     {"render-software",     no_argument,       0, OPT_RENDER_SOFTWARE},
+     {"no-border",           no_argument,       0, OPT_NO_BORDER},
++    {"pixels",              required_argument, 0, OPT_PIXELS},
++    {"colors",              required_argument, 0, OPT_COLORS},
++    {"saturation",          required_argument, 0, OPT_SATURATION},
++    {"brightness",          required_argument, 0, OPT_BRIGHTNESS},
++    {"color",               required_argument, 0, OPT_COLOR},
+     {"export-border",       no_argument,       0, OPT_EXPORT_BORDER},
+     {"trace",               required_argument, 0, OPT_TRACE},
+     {"trace-max",           required_argument, 0, OPT_TRACE_MAX},
+diff --git a/include/cli/cli_opts.h b/include/cli/cli_opts.h
+index 2a7e4b5..2783f43 100644
+--- a/include/cli/cli_opts.h
++++ b/include/cli/cli_opts.h
+@@ -20,6 +20,7 @@
+ #include "io/loci.h"             /* LOCI_USB_DEV_MAX */
+ #include "network/gdbstub.h"     /* GDB_DEFAULT_PORT */
+ #include "storage/disk.h"        /* FDC_MAX_BAD_SECTORS */
++#include "video/renderer_display.h" /* display_settings_t */
+ 
+ /* --screenshot-at / --dump-ram-at…: raw argument + capture type. */
+ typedef struct { const char* arg; timed_capture_type_t type; } cli_tcap_arg_t;
+@@ -94,6 +95,7 @@ typedef struct cli_opts_s {
+     const char* printer_type_arg;
+     int scale_factor;
+     bool render_software;
++    display_settings_t display;   /* --pixels, --colors, --saturation, --brightness, --color */
+     const char* trace_file;
+     const char* cycle_trace_file;
+     bool cpu_microseq;   /* V2-E1/US1.4: cycle-by-cycle core by default */
+diff --git a/include/video/renderer_display.h b/include/video/renderer_display.h
+new file mode 100644
+index 0000000..fce6134
+--- /dev/null
++++ b/include/video/renderer_display.h
+@@ -0,0 +1,57 @@
++/* SPDX-License-Identifier: EUPL-1.2 */
++/**
++ * @file renderer_display.h
++ * @brief Display settings of the SDL window: shape of the pixels and colours
++ *        of a television (ported from the oric-rpi bare-metal port,
++ *        kernel.cpp: pixels=, couleurs=, saturation=, luminosite=, rouge=…).
++ *
++ * Applied only when the image is shown (renderer_present): the emulated
++ * framebuffer, screenshots, videos and savestates keep the pure Oric colours.
++ */
++#ifndef RENDERER_DISPLAY_H
++#define RENDERER_DISPLAY_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++typedef enum {
++    DISPLAY_PIXELS_STRETCH = 0, /**< default: image stretched to the window */
++    DISPLAY_PIXELS_SQUARE,      /**< square pixels, proportions kept */
++    DISPLAY_PIXELS_TV           /**< 1.23:1 pixels (PAL TV), proportions kept */
++} display_pixels_t;
++
++typedef enum {
++    DISPLAY_COLORS_PURE = 0,    /**< 00/FF components (default) */
++    DISPLAY_COLORS_TV           /**< the colours of a television */
++} display_colors_t;
++
++typedef struct {
++    display_pixels_t pixels;
++    display_colors_t colors;
++    int saturation;             /**< percent, 100 = unchanged */
++    int brightness;             /**< percent, 100 = unchanged */
++    int32_t color[8];           /**< forced RRGGBB per Oric colour, -1 = none */
++} display_settings_t;
++
++/** Defaults: stretch, pure colours, 100 %, no forced colour. */
++void display_settings_init(display_settings_t* d);
++
++/** Parses a --pixels value: tv|tele, square|carres, stretch. */
++bool display_parse_pixels(const char* s, display_pixels_t* out);
++
++/** Parses a --colors value: tv|tele, pure|pures. */
++bool display_parse_colors(const char* s, display_colors_t* out);
++
++/** Parses NAME=RRGGBB (black…white or noir…blanc) into d->color[]. */
++bool display_parse_color(display_settings_t* d, const char* s);
++
++/** Computes the 8-colour palette (RGB888) from the settings. */
++void display_compute_palette(const display_settings_t* d, uint8_t pal[8][3]);
++
++/** True when the settings change nothing (upstream behaviour). */
++bool display_is_default(const display_settings_t* d);
++
++/** To call before renderer_init (window size follows the pixel shape). */
++void renderer_configure_display(const display_settings_t* d);
++
++#endif /* RENDERER_DISPLAY_H */
+diff --git a/src/cli/cli_args.c b/src/cli/cli_args.c
+index a34b54e..1747716 100644
+--- a/src/cli/cli_args.c
++++ b/src/cli/cli_args.c
+@@ -141,6 +141,38 @@ int cli_parse_args(int argc, char* argv[], cli_opts_t* cfg, emulator_t* emu) {
+                 break;
+             case OPT_RENDER_SOFTWARE: cfg->render_software = true; break;
+             case OPT_NO_BORDER: emu->no_border = true; break;
++            case OPT_PIXELS:
++                if (!display_parse_pixels(optarg, &cfg->display.pixels)) {
++                    fprintf(stderr, "Invalid --pixels: %s (tv, square or stretch)\n", optarg);
++                    return 1;
++                }
++                break;
++            case OPT_COLORS:
++                if (!display_parse_colors(optarg, &cfg->display.colors)) {
++                    fprintf(stderr, "Invalid --colors: %s (tv or pure)\n", optarg);
++                    return 1;
++                }
++                break;
++            case OPT_SATURATION:
++            case OPT_BRIGHTNESS: {
++                char* end;
++                long v = strtol(optarg, &end, 10);
++                if (*end != '\0' || v < 0 || v > 400) {
++                    fprintf(stderr, "Invalid --%s: %s (percent, 0-400)\n",
++                            opt == OPT_SATURATION ? "saturation" : "brightness", optarg);
++                    return 1;
++                }
++                if (opt == OPT_SATURATION) cfg->display.saturation = (int)v;
++                else cfg->display.brightness = (int)v;
++                break;
++            }
++            case OPT_COLOR:
++                if (!display_parse_color(&cfg->display, optarg)) {
++                    fprintf(stderr, "Invalid --color: %s (NAME=RRGGBB, NAME = black, red, green,\n"
++                                    "yellow, blue, magenta, cyan or white)\n", optarg);
++                    return 1;
++                }
++                break;
+             case OPT_EXPORT_BORDER: emu->export_border = true; break;
+             case OPT_REALTIME: emu->realtime = true; break;
+             case OPT_TAPE_SIGNAL: cfg->tape_signal = true; break;
+diff --git a/src/cli/cli_opts.c b/src/cli/cli_opts.c
+index 04b5678..f936ae4 100644
+--- a/src/cli/cli_opts.c
++++ b/src/cli/cli_opts.c
+@@ -16,6 +16,7 @@ void cli_opts_init(cli_opts_t* o) {
+     o->video_avi_quality = 85;
+     o->gdb_port = GDB_DEFAULT_PORT;
+     o->scale_factor = 3;
++    display_settings_init(&o->display);
+     o->cpu_microseq = true;
+     o->ula_per_cycle = true;
+     o->loci_usb_autoscan = true;
+diff --git a/src/cli/cli_usage.c b/src/cli/cli_usage.c
+index 839baff..027a7bd 100644
+--- a/src/cli/cli_usage.c
++++ b/src/cli/cli_usage.c
+@@ -107,6 +107,11 @@ void cli_print_usage(const char* program_name) {
+     usage_printf("      --scale N              Display scale factor: 1, 2, 3 (default), or 4\n");
+     usage_printf("      --render-software      Force the SDL software renderer (fixes a black window\n");
+     usage_printf("                             on some GPU/driver setups; same as SDL_RENDER_DRIVER=software)\n");
++    usage_printf("      --pixels SHAPE         tv (1.23:1, like a PAL television), square, or stretch\n");
++    usage_printf("                             (default: the image fills the window)\n");
++    usage_printf("      --colors SET           tv (colours of a television) or pure (default)\n");
++    usage_printf("      --saturation PCT, --brightness PCT   display palette (default 100)\n");
++    usage_printf("      --color NAME=RRGGBB    force one of the 8 colours (black…white)\n");
+     usage_printf("      --no-border            Disable the overscan border in the window (on by default)\n");
+     usage_printf("      --config FILE          Settings saved by the F1 peripherals menu (default:\n");
+     usage_printf("                             phosphoric.cfg, read unless --headless; the command\n");
+diff --git a/src/main.c b/src/main.c
+index a3cd049..80cc1ba 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -77,6 +77,7 @@
+ #include "utils/cycle_trace.h"
+ #include "cpu/microseq.h"
+ #include "utils/rominfo.h"
++#include "video/renderer_display.h"
+ #ifdef _WIN32
+ #include <windows.h>   /* GetModuleFileNameA (default ROM next to the .exe) */
+ #endif
+@@ -2804,6 +2805,7 @@ static int main_setup_machine(emulator_t* emu, cli_opts_t* cfg) {
+     emu->headless = cfg->headless;
+     emu->scale_factor = cfg->scale_factor;
+     emu->render_software = cfg->render_software;
++    renderer_configure_display(&cfg->display);   /* before renderer_init */
+ 
+     if (!emulator_init(emu)) {
+         log_error("Failed to initialize emulator");
+diff --git a/src/video/renderer.c b/src/video/renderer.c
+index cd93fa9..023320a 100644
+--- a/src/video/renderer.c
++++ b/src/video/renderer.c
+@@ -8,10 +8,32 @@
+  */
+ 
+ #include "video/video.h"
++#include "video/renderer_display.h"
+ 
+ #ifdef HAS_SDL2
+ #include <SDL2/SDL.h>
+ 
++/* Display settings (--pixels, --colors…), set before renderer_init. */
++static display_settings_t disp;
++static uint8_t disp_pal[8][3];
++static bool disp_remap;          /* palette differs from the pure colours */
++
++void renderer_configure_display(const display_settings_t* d) {
++    disp = *d;
++    display_compute_palette(d, disp_pal);
++    disp_remap = false;
++    for (int i = 0; i < 8; i++)
++        for (int c = 0; c < 3; c++)
++            if (disp_pal[i][c] != (((i >> c) & 1) ? 0xFF : 0x00)) disp_remap = true;
++}
++
++/* Width of a pixel for a height of 100 (TV: 123, as on the oric-rpi port:
++ * 6 MHz Oric dot clock, square pixels at 14.75 MHz, 2 fields). */
++static int pixel_ratio_x100(void) {
++    return disp.pixels == DISPLAY_PIXELS_TV ? 123 : 100;
++}
++
++
+ static SDL_Window* window;
+ static SDL_Renderer* sdl_renderer;
+ static SDL_Texture* texture;
+@@ -22,6 +44,16 @@ static int tex_h = ORIC_SCREEN_H;
+ static bool border_on = true;       /* Composite the overscan band */
+ /* Scratch buffer for the bordered composite (sized to the largest mode). */
+ static uint8_t composed[VIDEO_BORDERED_MAX_W * VIDEO_BORDERED_MAX_H * 3];
++/* Image with the display palette applied (colours=tv, saturation…). */
++static uint8_t remapped[VIDEO_BORDERED_MAX_W * VIDEO_BORDERED_MAX_H * 3];
++/* --pixels tv|square: the image is first enlarged by an integer factor
++ * (sharp), then brought to the window with linear filtering: at most one
++ * softened pixel per edge, as on the oric-rpi port. */
++#define DISP_UPSCALE 4
++static SDL_Texture* upscaled;
++static int up_w, up_h;
++
++static int window_w(int w, int scale) { return w * scale * pixel_ratio_x100() / 100; }
+ 
+ bool renderer_init(int scale, bool prefer_software) {
+     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0) return false;
+@@ -29,7 +61,7 @@ bool renderer_init(int scale, bool prefer_software) {
+     tex_h = ORIC_SCREEN_H;
+     window = SDL_CreateWindow("Phosphoric",
+         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+-        ORIC_SCREEN_W * scale, ORIC_SCREEN_H * scale,
++        window_w(ORIC_SCREEN_W, scale), ORIC_SCREEN_H * scale,
+         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+     if (!window) return false;
+ 
+@@ -73,6 +105,7 @@ bool renderer_init(int scale, bool prefer_software) {
+ }
+ 
+ void renderer_cleanup(void) {
++    if (upscaled) SDL_DestroyTexture(upscaled);
+     if (texture) SDL_DestroyTexture(texture);
+     if (sdl_renderer) SDL_DestroyRenderer(sdl_renderer);
+     if (window) SDL_DestroyWindow(window);
+@@ -117,9 +150,59 @@ void renderer_present(video_t* vid) {
+             tex_w, tex_h);
+         /* No SDL_RenderSetLogicalSize: SDL_RenderCopy fills the window. */
+     }
++    /* Display palette: only the pure Oric colours are replaced (the ULA-NG
++     * extended colours are left as they are). */
++    if (disp_remap) {
++        const int n = src_w * src_h;
++        for (int i = 0; i < n; i++) {
++            const uint8_t* p = pixels + i * 3;
++            uint8_t* q = remapped + i * 3;
++            const uint8_t r = p[0], g = p[1], b = p[2];
++            if ((r == 0 || r == 0xFF) && (g == 0 || g == 0xFF) && (b == 0 || b == 0xFF)) {
++                const uint8_t* c = disp_pal[(r & 1) | (g & 2) | (b & 4)];
++                q[0] = c[0]; q[1] = c[1]; q[2] = c[2];
++            } else {
++                q[0] = r; q[1] = g; q[2] = b;
++            }
++        }
++        pixels = remapped;
++    }
+     SDL_UpdateTexture(texture, NULL, pixels, src_w * 3);
+     SDL_RenderClear(sdl_renderer);
+-    SDL_RenderCopy(sdl_renderer, texture, NULL, NULL);
++    if (disp.pixels == DISPLAY_PIXELS_STRETCH) {
++        SDL_RenderCopy(sdl_renderer, texture, NULL, NULL);
++    } else {
++        /* Proportions kept: largest rectangle of ratio
++         * (src_w * ratio) : src_h inside the window, centred. */
++        int ow = 0, oh = 0;
++        SDL_GetRendererOutputSize(sdl_renderer, &ow, &oh);
++        const long iw = (long)src_w * pixel_ratio_x100(), ih = (long)src_h * 100;
++        SDL_Rect dst;
++        if ((long)ow * ih <= (long)oh * iw) {   /* width-limited */
++            dst.w = ow; dst.h = (int)((long)ow * ih / iw);
++        } else {
++            dst.h = oh; dst.w = (int)((long)oh * iw / ih);
++        }
++        dst.x = (ow - dst.w) / 2;
++        dst.y = (oh - dst.h) / 2;
++        const int uw = src_w * DISP_UPSCALE, uh = src_h * DISP_UPSCALE;
++        if (!upscaled || uw != up_w || uh != up_h) {
++            if (upscaled) SDL_DestroyTexture(upscaled);
++            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");   /* linear, for this one */
++            upscaled = SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_RGB888,
++                                         SDL_TEXTUREACCESS_TARGET, uw, uh);
++            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
++            up_w = uw; up_h = uh;
++        }
++        if (upscaled && SDL_SetRenderTarget(sdl_renderer, upscaled) == 0) {
++            SDL_RenderCopy(sdl_renderer, texture, NULL, NULL);   /* nearest: sharp */
++            SDL_SetRenderTarget(sdl_renderer, NULL);
++            SDL_RenderClear(sdl_renderer);
++            SDL_RenderCopy(sdl_renderer, upscaled, NULL, &dst);  /* linear */
++        } else {
++            SDL_RenderCopy(sdl_renderer, texture, NULL, &dst);   /* no render target */
++        }
++    }
+     SDL_RenderPresent(sdl_renderer);
+ }
+ 
+@@ -137,7 +220,7 @@ void renderer_set_scale(int scale) {
+     if (scale == current_scale) return;
+     current_scale = scale;
+     if (fullscreen) return; /* Don't resize in fullscreen */
+-    SDL_SetWindowSize(window, tex_w * scale, tex_h * scale);
++    SDL_SetWindowSize(window, window_w(tex_w, scale), tex_h * scale);
+     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+ }
+ 
+@@ -153,6 +236,7 @@ void renderer_cycle_scale(void) {
+ 
+ #else
+ 
++void renderer_configure_display(const display_settings_t* d) { (void)d; }
+ bool renderer_init(int scale, bool prefer_software) { (void)scale; (void)prefer_software; return true; }
+ void renderer_cleanup(void) {}
+ void renderer_present(video_t* vid) { (void)vid; }
+diff --git a/src/video/renderer_display.c b/src/video/renderer_display.c
+new file mode 100644
+index 0000000..1028f1d
+--- /dev/null
++++ b/src/video/renderer_display.c
+@@ -0,0 +1,91 @@
++/* SPDX-License-Identifier: EUPL-1.2 */
++/**
++ * @file renderer_display.c
++ * @brief Television display settings (palette computation and parsing).
++ *
++ * Ported from the oric-rpi bare-metal port (kernel.cpp, SetupDisplay): the
++ * TV colours are those of cpa-oric's remote console (tools/remote.html);
++ * saturation is applied around the grey of same luminance, then brightness.
++ */
++#include "video/renderer_display.h"
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++
++/* Television colours, in Oric order (bit 0 red, bit 1 green, bit 2 blue). */
++static const uint8_t tv_rgb[8][3] = {
++    {0x00, 0x00, 0x00}, {0xFF, 0x2A, 0x1A}, {0x2E, 0xC2, 0x2E}, {0xFD, 0xDE, 0x53},
++    {0x0A, 0x3C, 0xFF}, {0xEE, 0x22, 0xEE}, {0x18, 0xE8, 0xE8}, {0xFF, 0xFF, 0xFF}
++};
++
++static const char* const names_en[8] = {
++    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white" };
++static const char* const names_fr[8] = {
++    "noir", "rouge", "vert", "jaune", "bleu", "magenta", "cyan", "blanc" };
++
++void display_settings_init(display_settings_t* d) {
++    memset(d, 0, sizeof(*d));
++    d->saturation = 100;
++    d->brightness = 100;
++    for (int i = 0; i < 8; i++) d->color[i] = -1;
++}
++
++bool display_parse_pixels(const char* s, display_pixels_t* out) {
++    if (!s) return false;
++    if (!strcasecmp(s, "tv") || !strcasecmp(s, "tele") || !strcasecmp(s, "télé")) { *out = DISPLAY_PIXELS_TV; return true; }
++    if (!strcasecmp(s, "square") || !strcasecmp(s, "carres") || !strcasecmp(s, "carrés")) { *out = DISPLAY_PIXELS_SQUARE; return true; }
++    if (!strcasecmp(s, "stretch")) { *out = DISPLAY_PIXELS_STRETCH; return true; }
++    return false;
++}
++
++bool display_parse_colors(const char* s, display_colors_t* out) {
++    if (!s) return false;
++    if (!strcasecmp(s, "tv") || !strcasecmp(s, "tele") || !strcasecmp(s, "télé")) { *out = DISPLAY_COLORS_TV; return true; }
++    if (!strcasecmp(s, "pure") || !strcasecmp(s, "pures")) { *out = DISPLAY_COLORS_PURE; return true; }
++    return false;
++}
++
++bool display_parse_color(display_settings_t* d, const char* s) {
++    const char* eq = s ? strchr(s, '=') : NULL;
++    if (!eq) return false;
++    size_t n = (size_t)(eq - s);
++    const char* hex = eq + 1;
++    char* end;
++    unsigned long rgb = strtoul(hex, &end, 16);
++    if (*end != '\0' || end - hex != 6) return false;
++    for (int i = 0; i < 8; i++) {
++        if ((strlen(names_en[i]) == n && !strncasecmp(s, names_en[i], n)) ||
++            (strlen(names_fr[i]) == n && !strncasecmp(s, names_fr[i], n))) {
++            d->color[i] = (int32_t)rgb;
++            return true;
++        }
++    }
++    return false;
++}
++
++static uint8_t clamp255(int v) { return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v); }
++
++void display_compute_palette(const display_settings_t* d, uint8_t pal[8][3]) {
++    for (int i = 0; i < 8; i++) {
++        uint8_t* p = pal[i];
++        for (int c = 0; c < 3; c++)
++            p[c] = d->colors == DISPLAY_COLORS_TV ? tv_rgb[i][c] : (uint8_t)(((i >> c) & 1) * 0xFF);
++        int gray = (p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8;
++        for (int c = 0; c < 3; c++) {
++            int v = gray + (p[c] - gray) * d->saturation / 100;
++            p[c] = clamp255(v * d->brightness / 100);
++        }
++        if (d->color[i] >= 0) {
++            p[0] = (uint8_t)(d->color[i] >> 16);
++            p[1] = (uint8_t)(d->color[i] >> 8);
++            p[2] = (uint8_t)d->color[i];
++        }
++    }
++}
++
++bool display_is_default(const display_settings_t* d) {
++    if (d->pixels != DISPLAY_PIXELS_STRETCH || d->colors != DISPLAY_COLORS_PURE ||
++        d->saturation != 100 || d->brightness != 100) return false;
++    for (int i = 0; i < 8; i++) if (d->color[i] >= 0) return false;
++    return true;
++}
+diff --git a/web/shell.html b/web/shell.html
+index 4098b20..26af7b5 100644
+--- a/web/shell.html
++++ b/web/shell.html
+@@ -48,6 +48,8 @@
+            padding: 10px; box-shadow: 0 10px 50px rgba(0,0,0,.6); position: relative; }
+   canvas { display: block; width: 680px; max-width: 88vw; aspect-ratio: 240/224;
+            image-rendering: pixelated; background: #000; border-radius: 5px; }
++  /* ?pixels=tele: 1.23:1 pixels, like a PAL television (240 × 1.23 = 295) */
++  canvas.tele { aspect-ratio: 295/224; image-rendering: auto; }
+   /* Fullscreen: a .fs class is toggled in JS on fullscreenchange (more robust
+    * than the :fullscreen pseudo across browsers). !important beats any inline
+    * canvas style set by the SDL/Emscripten port. */
+diff --git a/web/shell.js b/web/shell.js
+index 7a9b388..cf382f7 100644
+--- a/web/shell.js
++++ b/web/shell.js
+@@ -78,6 +78,18 @@ var urlKbd = new URLSearchParams(location.search).get('clavier');
+ if (urlKbd) { try{ localStorage.setItem('phos_clavier', urlKbd); }catch(e){} }
+ var kbdLayout = urlKbd || (function(){ try{ return localStorage.getItem('phos_clavier'); }catch(e){ return null; } })() || '';
+ if (kbdLayout === 'fr' || kbdLayout === 'azerty') args.push('-k', kbdLayout);
++// ── Television display (?pixels=tele|carres, ?couleurs=tele|pures,
++// ?saturation=, ?luminosite=, remembered) — --pixels/--colors/… natively.
++var DISP_KEYS = { pixels: '--pixels', couleurs: '--colors', saturation: '--saturation', luminosite: '--brightness' };
++var disp = {};
++Object.keys(DISP_KEYS).forEach(function(k){
++  var v = new URLSearchParams(location.search).get(k);
++  if (v !== null) { try{ if (v) localStorage.setItem('phos_'+k, v); else localStorage.removeItem('phos_'+k); }catch(e){} }
++  else { try{ v = localStorage.getItem('phos_'+k); }catch(e){ v = null; } }
++  if (v) { disp[k] = v; args.push(DISP_KEYS[k], v); }
++});
++if (disp.pixels === 'tele' || disp.pixels === 'tv')
++  document.getElementById('canvas').classList.add('tele');
+ // Extra CLI arguments (e2e tests: --type-keys…), set in
+ // sessionStorage 'phos_extra_args' (JSON array) before loading.
+ try{ var extraArgs=JSON.parse(sessionStorage.getItem('phos_extra_args')||'[]');
+-- 
+2.43.0
+

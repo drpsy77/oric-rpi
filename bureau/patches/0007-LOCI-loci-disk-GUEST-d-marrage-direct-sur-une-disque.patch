@@ -1,0 +1,251 @@
+From 748dcd311e9e58163d46d3f083c61cb65f26b81f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 09:02:27 +0100
+Subject: [PATCH 07/11] =?UTF-8?q?LOCI=20:=20--loci-disk=20GUEST,=20d=C3=A9?=
+ =?UTF-8?q?marrage=20direct=20sur=20une=20disquette=20de=20LOCI=20(A:),=20?=
+ =?UTF-8?q?reprise=20du=20port=20oric-rpi=20(locidisk.c)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ Makefile                    |  1 +
+ include/cli/cli_options.h   |  4 +-
+ include/cli/cli_opts.h      |  1 +
+ include/io/loci_disk_boot.h | 24 ++++++++++
+ src/cli/cli_args.c          |  1 +
+ src/cli/cli_usage.c         |  2 +
+ src/io/loci_disk_boot.c     | 88 +++++++++++++++++++++++++++++++++++++
+ src/main.c                  | 12 +++++
+ 8 files changed, 132 insertions(+), 1 deletion(-)
+ create mode 100644 include/io/loci_disk_boot.h
+ create mode 100644 src/io/loci_disk_boot.c
+
+diff --git a/Makefile b/Makefile
+index ce530f5..a1490f4 100644
+--- a/Makefile
++++ b/Makefile
+@@ -198,6 +198,7 @@ SOURCES = src/main.c \
+           src/io/loci_fs.c \
+           src/io/loci_bus.c \
+           src/io/loci_boot.c \
++          src/io/loci_disk_boot.c \
+           src/io/loci_hw_probe.c \
+           src/io/loci_sdimg.c \
+           src/io/acia6551.c \
+diff --git a/include/cli/cli_options.h b/include/cli/cli_options.h
+index 6b98175..f67e31d 100644
+--- a/include/cli/cli_options.h
++++ b/include/cli/cli_options.h
+@@ -42,7 +42,8 @@ enum {
+     OPT_TYPE_KEYS_WHEN, OPT_POKE_AT, OPT_POKE_WHEN, OPT_TAPE_OUT_CAPTURE,
+     OPT_DISK_WEB, OPT_LOCI_WEB, OPT_LOCI_WEB_BASE, OPT_JASMIN_ROM,
+     OPT_CONFIG, OPT_NO_CONFIG, OPT_MENU_SCREENSHOT, OPT_GDB_BIND, OPT_NO_CONFIG_CARDS, OPT_NO_ROM,
+-    OPT_NO_AUTO_LOCI, OPT_PIXELS, OPT_COLORS, OPT_SATURATION, OPT_BRIGHTNESS, OPT_COLOR
++    OPT_NO_AUTO_LOCI, OPT_PIXELS, OPT_COLORS, OPT_SATURATION, OPT_BRIGHTNESS, OPT_COLOR,
++    OPT_LOCI_DISK
+ };
+ 
+ /* Short option string passed to getopt_long. */
+@@ -112,6 +113,7 @@ static const struct option long_options[] = {
+     {"render-software",     no_argument,       0, OPT_RENDER_SOFTWARE},
+     {"no-border",           no_argument,       0, OPT_NO_BORDER},
+     {"pixels",              required_argument, 0, OPT_PIXELS},
++    {"loci-disk",           required_argument, 0, OPT_LOCI_DISK},
+     {"colors",              required_argument, 0, OPT_COLORS},
+     {"saturation",          required_argument, 0, OPT_SATURATION},
+     {"brightness",          required_argument, 0, OPT_BRIGHTNESS},
+diff --git a/include/cli/cli_opts.h b/include/cli/cli_opts.h
+index 2783f43..3031915 100644
+--- a/include/cli/cli_opts.h
++++ b/include/cli/cli_opts.h
+@@ -112,6 +112,7 @@ typedef struct cli_opts_s {
+     const char* loci_usb_args[LOCI_USB_DEV_MAX];
+     int loci_usb_count;
+     bool loci_usb_autoscan;
++    const char* loci_disk;        /* --loci-disk GUEST: boot on a LOCI disk image */
+     const char* trace_irq_file;
+     const char* psg_trace_file;
+     const char* kbd_trace_file;
+diff --git a/include/io/loci_disk_boot.h b/include/io/loci_disk_boot.h
+new file mode 100644
+index 0000000..be08bde
+--- /dev/null
++++ b/include/io/loci_disk_boot.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: EUPL-1.2 */
++/**
++ * @file loci_disk_boot.h
++ * @brief --loci-disk GUEST: boot directly on a disk image of the LOCI
++ *        cartridge, without going through its menu (oric-rpi port,
++ *        locidisk.c, cmdline.txt locidisk=0:/cpa-en.dsk).
++ */
++#ifndef LOCI_DISK_BOOT_H
++#define LOCI_DISK_BOOT_H
++
++#include <stdbool.h>
++#include "emulator.h"
++
++/**
++ * Mounts GUEST (path as LOCI sees it, e.g. "0:/cpa.dsk") in drive A: of
++ * LOCI, writes the menu settings in XRAM (so the menu, F8, shows the image)
++ * and boots the Microdisc (BASIC 1.1 + microdis.rom from 0:), as the menu
++ * then ESC would. LOCI must be set up and its menu ROM loaded.
++ * @param modem  the modem (ACIA in $0380) is on: set in the menu settings
++ * @return false: nothing booted or boot incomplete (message logged)
++ */
++bool loci_disk_boot(emulator_t* emu, const char* guest, bool modem);
++
++#endif /* LOCI_DISK_BOOT_H */
+diff --git a/src/cli/cli_args.c b/src/cli/cli_args.c
+index 1747716..3fea769 100644
+--- a/src/cli/cli_args.c
++++ b/src/cli/cli_args.c
+@@ -141,6 +141,7 @@ int cli_parse_args(int argc, char* argv[], cli_opts_t* cfg, emulator_t* emu) {
+                 break;
+             case OPT_RENDER_SOFTWARE: cfg->render_software = true; break;
+             case OPT_NO_BORDER: emu->no_border = true; break;
++            case OPT_LOCI_DISK: cfg->loci_disk = optarg; break;
+             case OPT_PIXELS:
+                 if (!display_parse_pixels(optarg, &cfg->display.pixels)) {
+                     fprintf(stderr, "Invalid --pixels: %s (tv, square or stretch)\n", optarg);
+diff --git a/src/cli/cli_usage.c b/src/cli/cli_usage.c
+index 027a7bd..0745630 100644
+--- a/src/cli/cli_usage.c
++++ b/src/cli/cli_usage.c
+@@ -191,6 +191,8 @@ void cli_print_usage(const char* program_name) {
+     usage_printf("                             on stdout at exit. Use with -c N for fixed-cycle run.\n");
+     usage_printf("      --loci                 Enable LOCI MIA at $03A0-$03BF\n");
+     usage_printf("      --loci-flash DIR       Sandbox root for LOCI file ops (implies --loci)\n");
++    usage_printf("      --loci-disk GUEST      Boot on a LOCI disk image (e.g. 0:/cpa.dsk) in A:,\n");
++    usage_printf("                             without the menu (F8 shows it with A: filled)\n");
+     usage_printf("      --loci-sdimg PATH      Raw FAT16/32 SD image (read-only, implies --loci)\n");
+     usage_printf("                             Mutually exclusive with --loci-flash\n");
+     usage_printf("      --loci-usb DIR|none    Attach DIR as a LOCI USB key (repeatable, 4 max);\n");
+diff --git a/src/io/loci_disk_boot.c b/src/io/loci_disk_boot.c
+new file mode 100644
+index 0000000..0aebe1a
+--- /dev/null
++++ b/src/io/loci_disk_boot.c
+@@ -0,0 +1,88 @@
++/* SPDX-License-Identifier: EUPL-1.2 */
++/**
++ * @file loci_disk_boot.c
++ * @brief --loci-disk GUEST: direct boot on a disk image of the LOCI.
++ *
++ * Ported from the oric-rpi bare-metal port (locidisk.c). Without it, the
++ * image has to be chosen in the LOCI menu, then ESC. This does what the menu
++ * and the firmware then do, with Phosphoric's own functions:
++ *   1. mount in drive A: of LOCI, as op_mount (loci_fs.c);
++ *   2. menu settings in XRAM, as loci-rom (persist.c; layout noted by
++ *      cpa-oric, docs/usb.md): the menu (F8) shows the image and CP/A
++ *      accepts the drive;
++ *   3. boot as op_mia_boot (loci_boot.c) with LOCI_BOOT_FDC and
++ *      LOCI_BOOT_B11: BASIC 1.1 at $C000, microdis.rom at $A000 (overlay).
++ */
++#include "io/loci_disk_boot.h"
++#include "io/loci_glue.h"
++#include "io/loci_internal.h"
++#include "utils/logging.h"
++
++#include <stdio.h>
++#include <string.h>
++#include <unistd.h>
++
++/* Menu settings in XRAM (loci-rom src/persist.h) */
++#define CFG_BASE    0x8000      /* "LOCI" */
++#define CFG_FDC_ON  0x04
++#define CFG_B11_ON  0x08
++#define CFG_SER_ON  0x09
++#define CFG_MOUNTS  0x0B        /* bit n: drive n, 4 tape, 5 ROM */
++#define CFG_PATH    0x0D        /* menu directory, 256 bytes */
++#define CFG_NAMES   0x10D       /* + 35 x n: file name only, 32 chars at most */
++#define CFG_NAME_SZ 35
++
++static bool resolve_rom(loci_t* loci, const char* name, char* out, size_t outsz) {
++    char guest[32];
++    snprintf(guest, sizeof(guest), "0:%s", name);
++    return resolve_path(loci, guest, out, outsz);
++}
++
++bool loci_disk_boot(emulator_t* emu, const char* guest, bool modem) {
++    loci_t* loci = &emu->loci;
++    char host[512];
++
++    /* 1. Mount (op_mount) */
++    if (!resolve_path(loci, guest, host, sizeof(host)) || access(host, R_OK) != 0) {
++        log_error("--loci-disk: %s not found", guest);
++        return false;
++    }
++    if (!loci_dsk_open(loci, 0, host)) {
++        log_error("--loci-disk: cannot mount %s", host);
++        return false;
++    }
++    loci->mnt_mounted[0] = true;
++    snprintf(loci->mnt_paths[0], sizeof(loci->mnt_paths[0]), "%s", guest);
++
++    /* 2. Menu settings: Microdisc, BASIC 1.1, A: mounted */
++    uint8_t* cfg = &loci->xram[CFG_BASE];
++    memset(cfg, 0, CFG_NAMES + CFG_NAME_SZ * LOCI_MNT_MAX);
++    memcpy(cfg, "LOCI", 4);
++    cfg[CFG_FDC_ON] = 1;
++    cfg[CFG_B11_ON] = 1;
++    cfg[CFG_SER_ON] = modem ? 1 : 0;
++    cfg[CFG_MOUNTS] = 0x01;
++    const char* name = strrchr(guest, '/');
++    name = name ? name + 1 : (guest[0] && guest[1] == ':' ? guest + 2 : guest);
++    size_t dir = (size_t)(name - guest);
++    if (dir > 1 && guest[dir - 1] == '/' && guest[dir - 2] != ':') dir--;   /* "1:/games/x" -> "1:/games" */
++    if (dir > 255) dir = 255;
++    memcpy(&cfg[CFG_PATH], guest, dir);
++    snprintf((char*)&cfg[CFG_NAMES], 33, "%s", name);
++
++    /* 3. Boot (op_mia_boot, FDC + BASIC 1.1) */
++    char rom[512], disc[512];
++    if (!resolve_rom(loci, "basic11b.rom", rom, sizeof(rom)) ||
++        !resolve_rom(loci, "microdis.rom", disc, sizeof(disc))) {
++        log_error("--loci-disk: ROM path too long");
++        return false;
++    }
++    loci->boot_settings = LOCI_BOOT_FDC | LOCI_BOOT_B11;
++    if (!loci_rom_swap_cb(emu, rom, 0xC000) || !loci_rom_swap_cb(emu, disc, 0xA000)) {
++        log_error("--loci-disk: cannot load %s or %s (they must be in the LOCI flash, 0:)",
++                  rom, disc);
++        return false;
++    }
++    log_info("--loci-disk: %s in A:, booting the Microdisc", guest);
++    return true;
++}
+diff --git a/src/main.c b/src/main.c
+index 80cc1ba..8f6e7c4 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -78,6 +78,7 @@
+ #include "cpu/microseq.h"
+ #include "utils/rominfo.h"
+ #include "video/renderer_display.h"
++#include "io/loci_disk_boot.h"
+ #ifdef _WIN32
+ #include <windows.h>   /* GetModuleFileNameA (default ROM next to the .exe) */
+ #endif
+@@ -3459,6 +3460,17 @@ static int main_setup_disks_speech(emulator_t* emu, cli_opts_t* cfg) {
+         }
+     }
+ 
++    /* --loci-disk GUEST: direct boot on a disk image of the LOCI (A:),
++     * instead of its menu; if it fails, the menu stays the system ROM. */
++    if (cfg->loci_disk) {
++        if (!emu->card_on[CARD_IDX_loci]) {
++            log_warning("--loci-disk needs --loci: ignored");
++        } else if (!loci_disk_boot(emu, cfg->loci_disk, emu->card_on[CARD_IDX_acia])) {
++            if (cfg->rom_file && memory_load_rom(&emu->memory, cfg->rom_file, 0))
++                loci_patch_rom_info(emu);
++        }
++    }
++
+     /* Apply --bad-sector [D:]S:T:N fault injections. Damage follows the
+      * media: the maps live per drive at the controller layer (Microdisc
+      * and/or LOCI) and are wiped when a new disk is inserted. Applied after
+-- 
+2.43.0
+
