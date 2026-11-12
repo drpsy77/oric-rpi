@@ -40,6 +40,7 @@ Windows (SDL2 pour MinGW est téléchargé), emsdk actif pour le web
 | 10 | Cassette : interceptions seulement si la ROM BASIC est visible | point 6 |
 | 11 | Windows : pile de 16 Mo (débordement au démarrage) | correctif |
 | 12 | `--disk-autosave` : pistes modifiées réécrites 2 s après la dernière écriture (Microdisc et LOCI, MFM compris), à la sortie et avant un changement de disquette ; web : disquettes gardées par le navigateur, bouton DSK (téléchargement), IDBFS des Emscripten récents | `disquette.c`, point 3 |
+| 13 | Horloge : débordement de la dernière instruction de la trame reporté sur la suivante (`emu_clock_frame_begin`) : le faisceau garde exactement 19 968 cycles par trame, un T1 à 50 Hz reste calé (VSYNC.COM de CP/A) | constat du port, correction amont |
 
 Les patchs 3 et 11 corrigent le build Windows de la 2.31.15 lui-même : sans
 eux, il ne se lie pas, puis plante au démarrage.
@@ -60,6 +61,10 @@ publique au lieu d'être copiée comme dans `disquette.c`.
 - Disquettes (patch 12) : `REN X.SPR=DUN.SPR` sous CP/A, en LOCI (MFM) et en
   Microdisc : piste réécrite pendant l'exécution, la disquette relue montre
   X.SPR. Web : réécrite, gardée après rechargement, téléchargée par DSK.
+- Horloge (patch 13) : nouveaux tests de `test-clock`, T1 à 19 968 cycles
+  calé à une instruction près sur 300 trames et somme des cycles exacte ;
+  tous deux échouent sans le patch. `test-cycle`, `test-raster-split`,
+  `test-savestate-determinism`, vidéo, système, Atmos : inchangés.
 - Natif : sans le patch 10, `HEX DUN.SPR` sous CP/A (Microdisc) déclenche une
   fausse interception CSAVE ; avec, aucune.
 
@@ -69,5 +74,5 @@ Les patchs s'appliquent par `git am` sur `acfeacc` ; un par sujet, avec
 tests. Pour une demande de fusion : fork de Phosphoric sur GitHub, branche
 depuis `main`, `git am bureau/patches/*.patch`, puis une PR par groupe
 (Windows 3+6+11, clavier 1+2+9, affichage 4, ACIA 5+8, LOCI 7, cassette 10,
-disquettes 12),
+disquettes 12, horloge 13),
 avec `docs/phosphoric-f8.md` comme description des défauts.

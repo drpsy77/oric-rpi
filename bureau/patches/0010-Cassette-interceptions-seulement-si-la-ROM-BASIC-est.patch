@@ -1,7 +1,7 @@
 From 5c2316b65aec0c8ae4e11fe213696e333910c24c Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 09:03:59 +0100
-Subject: [PATCH 10/12] Cassette : interceptions seulement si la ROM BASIC est
+Subject: [PATCH 10/13] Cassette : interceptions seulement si la ROM BASIC est
  visible (CP/A sous ROMDIS), comme Oricutron ; reprise du port oric-rpi
 
 ---

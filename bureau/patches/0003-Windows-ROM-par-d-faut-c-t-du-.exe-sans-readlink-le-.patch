@@ -1,7 +1,7 @@
 From d047dfaf65d5640ff2710b7f12aaca4a264ada03 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 08:52:27 +0100
-Subject: [PATCH 03/12] =?UTF-8?q?Windows=20:=20ROM=20par=20d=C3=A9faut=20?=
+Subject: [PATCH 03/13] =?UTF-8?q?Windows=20:=20ROM=20par=20d=C3=A9faut=20?=
  =?UTF-8?q?=C3=A0=20c=C3=B4t=C3=A9=20du=20.exe=20sans=20readlink=20(le=20b?=
  =?UTF-8?q?uild=20MinGW=20ne=20se=20liait=20plus)?=
 MIME-Version: 1.0

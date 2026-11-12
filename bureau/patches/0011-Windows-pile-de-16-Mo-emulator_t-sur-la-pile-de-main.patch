@@ -1,7 +1,7 @@
 From 258fc16cfcbde64e248486dde11c0ae1ca9e7fc5 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 09:06:52 +0100
-Subject: [PATCH 11/12] =?UTF-8?q?Windows=20:=20pile=20de=2016=20Mo=20(emul?=
+Subject: [PATCH 11/13] =?UTF-8?q?Windows=20:=20pile=20de=2016=20Mo=20(emul?=
  =?UTF-8?q?ator=5Ft=20sur=20la=20pile=20de=20main=20:=20d=C3=A9bordement?=
  =?UTF-8?q?=20au=20d=C3=A9marrage)?=
 MIME-Version: 1.0

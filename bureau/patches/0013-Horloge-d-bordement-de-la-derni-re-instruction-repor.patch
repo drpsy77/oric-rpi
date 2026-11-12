@@ -1,0 +1,132 @@
+From 9bf64741f56bf7aed5ffce7fc24f1669362d5962 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 16:18:16 +0100
+Subject: [PATCH 13/13] =?UTF-8?q?Horloge=20:=20d=C3=A9bordement=20de=20la?=
+ =?UTF-8?q?=20derni=C3=A8re=20instruction=20report=C3=A9=20sur=20la=20tram?=
+ =?UTF-8?q?e=20suivante=20(T1=20=C3=A0=2050=20Hz=20cal=C3=A9=20sur=20le=20?=
+ =?UTF-8?q?balayage,=20VSYNC.COM=20de=20CP/A)=20;=20reprise=20du=20port=20?=
+ =?UTF-8?q?oric-rpi?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/emu_clock.c         | 25 ++++++++++++++---
+ tests/unit/test_clock.c | 60 +++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 82 insertions(+), 3 deletions(-)
+
+diff --git a/src/emu_clock.c b/src/emu_clock.c
+index 56c36ab..52a3db5 100644
+--- a/src/emu_clock.c
++++ b/src/emu_clock.c
+@@ -182,11 +182,30 @@ void emu_clock_frame_begin(emulator_t* emu) {
+         emu_clock_resume(emu);
+         return;
+     }
+-    emu->raster_cycle = 0;
++    /* The frame loop runs whole instructions while raster_cycle <
++     * CYCLES_PER_FRAME: the last one overruns by 1 to 6 cycles, which the
++     * CPU and the VIA have counted. They belong to line 0 of this new frame:
++     * carried over, as Oricutron does. Resetting to 0 made every frame
++     * 19 968 cycles + that overrun for the beam, so a T1 at 50 Hz (latch
++     * 19 966) drifted by 1 to 3 lines a second against the scan (CP/A's
++     * VSYNC.COM could not lock; oric-rpi port). A frame cut short (halt,
++     * breakpoint) leaves raster_cycle below the frame: no carry. */
++    int carry = emu->raster_cycle - CYCLES_PER_FRAME;
++    if (carry < 0 || carry >= PAL_CYCLES_PER_LINE) carry = 0;
++    emu->raster_cycle = carry;
+     emu->raster_rendered = 0;
+     emu->raster_ng_line = 0;
+-    emu->raster_next_line = PAL_CYCLES_PER_LINE;
+-    emu->frame_cycles = 0;
++    emu->raster_next_line = PAL_CYCLES_PER_LINE;   /* line 0 not finished */
++    emu->frame_cycles = carry;
++
++    /* Cycle-level ULA: the cells of line 0 already scanned during the
++     * overrun (the line-by-line render needs nothing, line 0 is emitted at
++     * its end). */
++    if (carry > 0 && ula_cycle_in_use(emu)) {
++        video_line_begin(&emu->video, emu->memory.ram, 0);
++        for (int col = 0; col < carry - emu->ula_fetch_offset && col <= 40; col++)
++            video_render_cell(&emu->video, emu->memory.ram, 0, col);
++    }
+ }
+ 
+ void emu_clock_frame_end(emulator_t* emu) {
+diff --git a/tests/unit/test_clock.c b/tests/unit/test_clock.c
+index e24a8b4..6570452 100644
+--- a/tests/unit/test_clock.c
++++ b/tests/unit/test_clock.c
+@@ -345,9 +345,69 @@ TEST(test_raster_and_cpu_stay_in_step_over_a_frame) {
+     ASSERT_EQ((int)g_emu.cpu.cycles, g_emu.raster_cycle);
+ }
+ 
++/* Frames of whole instructions, as run_frame_instructions: the overrun of
++ * the last instruction is carried over to the next frame, so the beam keeps
++ * exactly CYCLES_PER_FRAME cycles per frame (a T1 at 19 968 cycles stays
++ * locked on the scan, CP/A's VSYNC.COM). */
++TEST(test_frame_overrun_carried_over) {
++    uint8_t code[] = { 0xEE, 0x00, 0x04,       /* loop: INC $0400 (6 cycles) */
++                       0x4C, 0x00, 0x02 };     /* JMP loop (3) */
++    setup(code, sizeof(code), true);
++    int overran = 0;
++    for (int f = 0; f < 200; f++) {
++        emu_clock_frame_begin(&g_emu);
++        while (g_emu.raster_cycle < CYCLES_PER_FRAME) emu_step(&g_emu);
++        if (g_emu.raster_cycle > CYCLES_PER_FRAME) overran++;
++    }
++    ASSERT_TRUE(overran > 0);                  /* the case does occur */
++    ASSERT_EQ((long long)g_emu.cpu.cycles,
++              199LL * CYCLES_PER_FRAME + g_emu.raster_cycle);
++}
++
++TEST(test_frame_cut_short_starts_at_zero) {
++    uint8_t code[] = { 0xEA };
++    setup(code, sizeof(code), true);
++    for (int i = 0; i < 100; i++) emu_cycle(&g_emu);   /* halt mid-frame */
++    emu_clock_frame_begin(&g_emu);
++    ASSERT_EQ(g_emu.raster_cycle, 0);
++}
++
++/* The case of CP/A's VSYNC.COM: VIA T1 free-running at 19 968 cycles
++ * (latch 19 966 + 2), as long as one frame. Its underflow must stay at the
++ * same place of the scan, frame after frame (within one instruction): before
++ * the carry-over, it drifted by the overrun of every frame. */
++TEST(test_t1_at_frame_period_stays_locked_on_the_scan) {
++    uint8_t code[] = { 0xEE, 0x00, 0x04, 0x4C, 0x00, 0x02 };   /* INC $0400; JMP */
++    setup(code, sizeof(code), true);
++    via_write(&g_emu.via, 0x0B, 0x40);           /* ACR: T1 free-running */
++    via_write(&g_emu.via, 0x04, 19966 & 0xFF);   /* T1C-L latch */
++    via_write(&g_emu.via, 0x05, 19966 >> 8);     /* T1C-H: start */
++    int first = -1, min = 1 << 30, max = -1, seen = 0;
++    for (int f = 0; f < 300; f++) {
++        emu_clock_frame_begin(&g_emu);
++        while (g_emu.raster_cycle < CYCLES_PER_FRAME) {
++            emu_step(&g_emu);
++            if (g_emu.via.ifr & 0x40) {
++                (void)via_read(&g_emu.via, 0x04);    /* clears the T1 flag */
++                int pos = g_emu.raster_cycle;
++                if (f < 5) { first = pos; continue; } /* settling */
++                if (pos < min) min = pos;
++                if (pos > max) max = pos;
++                seen++;
++            }
++        }
++    }
++    ASSERT_TRUE(first >= 0);
++    ASSERT_TRUE(seen >= 290);
++    ASSERT_TRUE(max - min <= 8);                 /* one instruction, no drift */
++}
++
+ int main(void) {
+     printf("=== Horloge maître (V2-E2) ===\n\n");
+     RUN(test_branch_not_taken_costs_no_phantom_cycle);
++    RUN(test_t1_at_frame_period_stays_locked_on_the_scan);
++    RUN(test_frame_overrun_carried_over);
++    RUN(test_frame_cut_short_starts_at_zero);
+     RUN(test_raster_and_cpu_stay_in_step_over_a_frame);
+     RUN(test_one_call_is_one_cycle);
+     RUN(test_peripherals_get_one_cycle_at_a_time);
+-- 
+2.43.0
+

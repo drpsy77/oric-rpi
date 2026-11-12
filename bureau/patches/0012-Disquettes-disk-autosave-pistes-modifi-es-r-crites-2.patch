@@ -1,7 +1,7 @@
 From f80e4362a33942d78233995f3dbffcf8df83a4da Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 12:03:22 +0100
-Subject: [PATCH 12/12] =?UTF-8?q?Disquettes=20:=20--disk-autosave,=20piste?=
+Subject: [PATCH 12/13] =?UTF-8?q?Disquettes=20:=20--disk-autosave,=20piste?=
  =?UTF-8?q?s=20modifi=C3=A9es=20r=C3=A9=C3=A9crites=202=20s=20apr=C3=A8s?=
  =?UTF-8?q?=20la=20derni=C3=A8re=20=C3=A9criture=20(Microdisc=20et=20LOCI,?=
  =?UTF-8?q?=20MFM=20compris)=20;=20web=20:=20persistance=20dans=20le=20nav?=

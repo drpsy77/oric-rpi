@@ -1,7 +1,7 @@
 From 65c6f10665e9b1592644cee748b8411dfd5f56a9 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 12 Nov 2026 08:55:41 +0100
-Subject: [PATCH 04/12] =?UTF-8?q?Affichage=20:=20points=20et=20couleurs=20?=
+Subject: [PATCH 04/13] =?UTF-8?q?Affichage=20:=20points=20et=20couleurs=20?=
  =?UTF-8?q?d'un=20t=C3=A9l=C3=A9viseur=20(--pixels,=20--colors,=20--satura?=
  =?UTF-8?q?tion,=20--brightness,=20--color),=20reprise=20du=20port=20oric-?=
  =?UTF-8?q?rpi?=
