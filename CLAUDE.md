@@ -48,6 +48,15 @@ est la copie de travail de la carte. La carte SD de la 3B+, branchée sur la
 RPI 400 par un lecteur USB, apparaît en `/dev/sda1` (étiquette ORIC) ; la
 monter par `udisksctl mount -b /dev/sda1` (→ `/media/pi/ORIC`), la démonter
 par `udisksctl unmount -b /dev/sda1` avant que Pierre la retire.
+Noyau et disquettes de CP/A : `sh installer_carte.sh` (`--sans-noyau`)
+(copie dans `oric/usb/` et `oric/loci/`, dont le `cpa-en.dsk` est
+le A: de `locidisk` ; anciennes images de `oric/loci/` dans
+`oric/loci/ancien/` ; `oric/azerty.kma` s'il manque ; démonte la carte).
+Avant la copie, `sauvegarde_disquettes.py` met les fichiers ajoutés ou
+modifiés sur ces disquettes depuis l'installation précédente (référence :
+`sauvegarde/installe/`) dans `sauvegarde/SAUVE.DSK` (hors Git, avec
+`sauvegarde/ancien/`, les images remplacées), remise ensuite en
+`oric/usb/sauve.dsk`.
 
 **Après chaque `make` de circle-stdlib**, recompiler le pilote Wi-Fi avec
 les en-têtes de circle-newlib (voir Leçons) :
@@ -74,11 +83,13 @@ section `[...]` ; modèle `sdcard/`), `cmdline.txt` (une ligne), `oric/`.
 Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 
 `cmdline.txt` :
-- commun : `width=590 height=448 keymap=FR` (`pixels=tele` par défaut,
+- commun : `width=590 height=448 keymap=FR` (`clavier=oric/azerty.kma` :
+  correspondance d'Oricutron, modèle `sdcard/`, remplace la table intégrée ;
+  `pixels=tele` par défaut,
   `pixels=carres` ; `couleurs=tele|pures`, `saturation=`, `luminosite=` en %,
   `rouge=RRGGBB`... pour les 8 couleurs, palette notée dans le journal) ;
 - sans LOCI : `rom=oric/basic11b.rom`, plus `diskrom=oric/microdis.rom
-  disk=oric/xxx.dsk` pour le Microdisc ;
+  disk=oric/usb/xxx.dsk` pour le Microdisc ;
 - avec LOCI : `loci=1`, **sans** `rom=` (la ROM système est le menu) ;
   `oric/loci/` = flash « 0: » (`locirom`, `basic11b.rom`, `microdis.rom`),
   `oric/usb/` = clé « 1: » (`.dsk`, `.tap`) ; le menu ne voit rien d'autre ;
@@ -124,6 +135,7 @@ mesure ajoutée par appui),
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
 | `main.cpp` | copie circle-stdlib |
+| `installer_carte.sh`, `sauvegarde_disquettes.py` | installation sur la carte, sauvegarde des fichiers écrits sur l'Oric |
 | `Makefile`, `sdcard/`, `README.md`, `SOURCES.md`, `docs/` | |
 
 ## Points techniques
@@ -160,6 +172,13 @@ mesure ajoutée par appui),
   `close` : le cœur 0 envoie le reste puis ferme.
 - ACIA sans cadence : `[port]` dans `oric_machine.c`, `acia_write` détourné
   (`--wrap`) ; `rx_reload`/`tx_reload` remis à 1 après chaque écriture.
+- `+++` du modem : `[port]` `esc_send` dans `oric_machine.c` (`send`, `poll`,
+  `recv` du backend remplacés). Le picowifi compte son silence en appels de
+  `recv`, que l'ACIA ne fait que si un octet est arrivé : `+++` de `REMOTE
+  OFF` jamais reconnu. Un « + » après 1 s sans émission (cycles), puis deux
+  autres à moins de 1 s, reçoivent 50 appels de `recv` (octets gardés et
+  rendus avant les autres). Vérifié sur le banc natif (copie de Phosphoric,
+  même code sous `PORT_ESC`) : REMOTE, REMOTE OFF (hangup), REMOTE.
 - Sockets de circle-newlib : pas de `O_NONBLOCK` (fcntl → ENOSYS) ; le relais
   le mémorise et lit par `recv(MSG_DONTWAIT)`. DNS : pas de noms `.local`.
 - Écran : `config.txt` propose des blocs (A mode préféré actif, 60 Hz natif de l'écran de Pierre ; B 720p50,
@@ -224,7 +243,8 @@ mesure ajoutée par appui),
 - Défauts de Phosphoric restant dans `docs/phosphoric-f8.md` (à envoyer à
   bmarty) : ACIA de LOCI qui écrase les octets non lus (contourné), ACIA
   cadencée (contourné), disquettes non réécrites (contourné), pas de
-  montage au démarrage (`locidisk`).
+  montage au démarrage (`locidisk`), `+++` non reconnu sur une ligne calme
+  (contourné), cassette interceptée sous ROMDIS (contourné).
 - Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
   MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
   pistes changées réécrites sur place 2 s après la dernière écriture (banc

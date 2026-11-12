@@ -17,7 +17,8 @@
 //   saturation=100 luminosite=100 couleurs plus vives / plus claires (en %)
 //   rouge=FF2A1A ...              une couleur imposée (RRGGBB) : noir, rouge,
 //                                 vert, jaune, bleu, magenta, cyan, blanc
-//   keymap=FR                     clavier AZERTY (lettres A/Q, Z/W, M, ; ,)
+//   keymap=FR                     clavier AZERTY (A/Q, Z/W, M, ; : ù * ² !)
+//   clavier=oric/azerty.kma       correspondance d'Oricutron (remplace la table)
 //   rom=oric/basic11b.rom         ROM système (défaut)
 //   diskrom=oric/microdis.rom     ROM du Microdisc  } les deux pour activer
 //   disk=oric/xxx.dsk             disquette lecteur A } le Microdisc
@@ -105,7 +106,6 @@ CKernel::CKernel (void)
 	m_bClockSet (false),
 	m_pKeyboard (0),
 	m_pSound (0),
-	m_bAzerty (false),
 	m_nScaleY (1),
 	m_nOutWidth (0), m_nOutHeight (0),
 	m_nOffsetX (0), m_nOffsetY (0),
@@ -361,9 +361,6 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 {
 	mLogger.Write (FromOric, LogNotice, "Phosphoric %s sur Circle", oric_machine_version ());
 
-	const char *pKeyMap = Option ("keymap", mOptions.GetKeyMap ());
-	m_bAzerty = pKeyMap != 0 && strcmp (pKeyMap, "FR") == 0;
-
 	// Journal de Phosphoric dans oric/journal.txt (plus rien sur l'image)
 	FILE *pJournal = JournalOpen ("oric/journal.txt", "oric/journal-precedent.txt");
 	if (pJournal != 0)
@@ -379,6 +376,8 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			JournalPrintf ("  %s=%s\n", s_pSettingName[i], s_pSettingValue[i]);
 		}
 	}
+
+	SetupKeyMap ();
 
 	// Fuseau horaire (règle POSIX de TZ), avant que le cœur 1 ne démarre
 	setenv ("TZ", Option ("fuseau", "CET-1CEST,M3.5.0,M10.5.0/3"), 1);
@@ -738,7 +737,10 @@ static const struct { unsigned char ucMask; int nCol, nRow; } s_OricMods[] =
 	{ ALT,    5, 4 }, { ALTGR,  6, 4 }, { RSHIFT, 7, 4 }	// Alt = FUNCT
 };
 
-// Clavier AZERTY (keymap=FR) : ramène les lettres déplacées à leur code QWERTY.
+// Clavier AZERTY (keymap=FR) : ramène les lettres déplacées à leur code QWERTY ;
+// signes choisis par Pierre (touche du PC -> touche de l'Oric, MAJ donnant le
+// second signe de celle-ci) : ù -> ;  * -> '  ; -> .  : -> /  ² et ! -> \ .
+// Comme keymap/azerty.kma d'Oricutron chez Pierre.
 static unsigned char AzertyToQwerty (unsigned char ucKey)
 {
 	switch (ucKey)
@@ -749,9 +751,126 @@ static unsigned char AzertyToQwerty (unsigned char ucKey)
 	case 0x1D: return 0x1A;	// touche W  -> w
 	case 0x33: return 0x10;	// touche M  -> m
 	case 0x10: return 0x36;	// touche ,  -> ,
-	case 0x36: return 0x33;	// touche ;  -> ;
+	case 0x36: return 0x37;	// touche ;  -> .
+	case 0x37: return 0x38;	// touche :  -> /
+	case 0x34: return 0x33;	// touche ù  -> ;
+	case 0x32:			// touche *  -> ' (ISO ; 0x31 sur
+	case 0x31: return 0x34;	//   certains claviers)
+	case 0x35:			// touche ²  -> antislash
+	case 0x38: return 0x31;	// touche !  -> antislash
 	default:   return ucKey;
 	}
+}
+
+// Fichier de correspondance d'Oricutron (clavier=oric/azerty.kma) : lignes
+// « hôte : oric », codes de touche de SDL 1 (le caractère de la touche sans
+// MAJ : 249 = ù, 92 = antislash ; 8, 9, 13, 27, 127, flèches 273-276).
+// La Pi reçoit des positions (codes HID) : chaque code de SDL 1 est ramené à
+// la position qui porte ce caractère, sur le clavier de l'hôte (AZERTY avec
+// keymap=FR, sinon QWERTY) à gauche, sur le QWERTY de la table de l'Oric à
+// droite. Une touche absente du fichier garde sa position.
+static const struct { unsigned char ucHID; unsigned short usQwerty, usAzerty; } s_Layout[] =
+{
+	{ 0x04, 'a', 'q' }, { 0x05, 'b', 'b' }, { 0x06, 'c', 'c' }, { 0x07, 'd', 'd' },
+	{ 0x08, 'e', 'e' }, { 0x09, 'f', 'f' }, { 0x0A, 'g', 'g' }, { 0x0B, 'h', 'h' },
+	{ 0x0C, 'i', 'i' }, { 0x0D, 'j', 'j' }, { 0x0E, 'k', 'k' }, { 0x0F, 'l', 'l' },
+	{ 0x10, 'm', ',' }, { 0x11, 'n', 'n' }, { 0x12, 'o', 'o' }, { 0x13, 'p', 'p' },
+	{ 0x14, 'q', 'a' }, { 0x15, 'r', 'r' }, { 0x16, 's', 's' }, { 0x17, 't', 't' },
+	{ 0x18, 'u', 'u' }, { 0x19, 'v', 'v' }, { 0x1A, 'w', 'z' }, { 0x1B, 'x', 'x' },
+	{ 0x1C, 'y', 'y' }, { 0x1D, 'z', 'w' },
+	{ 0x1E, '1', '&' }, { 0x1F, '2', 233 }, { 0x20, '3', '"' }, { 0x21, '4', '\'' },
+	{ 0x22, '5', '(' }, { 0x23, '6', '-' }, { 0x24, '7', 232 }, { 0x25, '8', '_' },
+	{ 0x26, '9', 231 }, { 0x27, '0', 224 },
+	{ 0x28, 13, 13 }, { 0x29, 27, 27 }, { 0x2A, 8, 8 }, { 0x2B, 9, 9 }, { 0x2C, ' ', ' ' },
+	{ 0x2D, '-', ')' }, { 0x2E, '=', '=' }, { 0x2F, '[', '^' }, { 0x30, ']', '$' },
+	{ 0x31, '\\', '*' }, { 0x32, '#', '*' }, { 0x33, ';', 'm' }, { 0x34, '\'', 249 },
+	{ 0x35, '`', 178 }, { 0x36, ',', ';' }, { 0x37, '.', ':' }, { 0x38, '/', '!' },
+	{ 0x4C, 127, 127 }, { 0x4F, 275, 275 }, { 0x50, 276, 276 }, { 0x51, 274, 274 },
+	{ 0x52, 273, 273 }, { 0x64, '\\', '<' }
+};
+
+// Code HID de la touche du PC -> code HID QWERTY cherché dans s_OricKeys
+static unsigned char s_KeyMap[256];
+
+static bool IsOricKey (unsigned char ucKey)
+{
+	for (unsigned j = 0; j < 64; j++)
+	{
+		if (s_OricKeys[j] == ucKey)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void CKernel::SetupKeyMap (void)
+{
+	const char *pKeyMap = Option ("keymap", mOptions.GetKeyMap ());
+	bool bAzerty = pKeyMap != 0 && strcmp (pKeyMap, "FR") == 0;
+	const char *pFile = Option ("clavier");
+
+	FILE *pKma = pFile != 0 ? fopen (pFile, "r") : 0;
+	for (unsigned i = 0; i < 256; i++)
+	{
+		s_KeyMap[i] = bAzerty && pKma == 0 ? AzertyToQwerty (i) : i;
+	}
+	if (pFile == 0)
+	{
+		return;
+	}
+	if (pKma == 0)
+	{
+		JournalPrintf ("clavier=%s : fichier absent, table %s\n", pFile,
+			       bAzerty ? "AZERTY" : "QWERTY");
+		return;
+	}
+
+	unsigned nLine = 0, nOK = 0;
+	char Line[80];
+	while (fgets (Line, sizeof Line, pKma) != 0)
+	{
+		nLine++;
+		Line[strcspn (Line, "#\r\n")] = '\0';	// commentaire, fin de ligne
+		unsigned nHost, nOric;
+		char cEnd;
+		int nFields = sscanf (Line, "%u : %u %c", &nHost, &nOric, &cEnd);
+		if (nFields <= 0)
+		{
+			continue;			// ligne vide ou commentaire
+		}
+
+		int nTarget = -1;			// position QWERTY de la touche de l'Oric
+		for (unsigned k = 0; k < sizeof s_Layout / sizeof s_Layout[0]; k++)
+		{
+			if (s_Layout[k].usQwerty == nOric && IsOricKey (s_Layout[k].ucHID))
+			{
+				nTarget = s_Layout[k].ucHID;
+				break;
+			}
+		}
+		bool bHost = false;			// toutes les positions qui portent ce caractère
+		for (unsigned k = 0; nFields == 2 && nTarget >= 0
+				     && k < sizeof s_Layout / sizeof s_Layout[0]; k++)
+		{
+			if ((bAzerty ? s_Layout[k].usAzerty : s_Layout[k].usQwerty) == nHost)
+			{
+				s_KeyMap[s_Layout[k].ucHID] = nTarget;
+				bHost = true;
+			}
+		}
+		if (bHost)
+		{
+			nOK++;
+		}
+		else
+		{
+			JournalPrintf ("clavier=%s : ligne %u refusee : %s\n", pFile, nLine, Line);
+		}
+	}
+	fclose (pKma);
+	JournalPrintf ("clavier=%s : %u correspondance(s) (clavier %s)\n", pFile, nOK,
+		       bAzerty ? "AZERTY" : "QWERTY");
 }
 
 // Appelé en interruption à chaque rapport du clavier : on reconstruit toute
@@ -839,10 +958,7 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
 		{
 			ucKey = 0x2A;
 		}
-		if (s_pThis->m_bAzerty)
-		{
-			ucKey = AzertyToQwerty (ucKey);
-		}
+		ucKey = s_KeyMap[ucKey];
 
 		for (unsigned j = 0; j < 64; j++)
 		{
