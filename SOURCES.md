@@ -64,11 +64,12 @@ captures AVI/images, traces/profilage, CLI, hostfs, fast-load et auto-frappe.
 | `compat/ifaddrs.h` | `<ifaddrs.h>`, absent de circle-newlib | Écrit pour le port (déclarations POSIX/BSD habituelles) |
 | `journal.cpp`, `journal.h` | Journal de Phosphoric dans `oric/journal.txt`, en mémoire puis écrit par le cœur 0 | Écrit pour le port |
 | `netrelay.cpp`, `netrelay.h` | Sockets et fermetures de fichiers de l'émulation (cœur 1) exécutés par le cœur 0 (`--wrap` de l'éditeur de liens) | Écrit pour le port |
+| `tftp.cpp`, `tftp.h` | Serveur TFTP de la carte SD (`tftp=`) : fichiers en mémoire, carte touchée entre deux trames, remplacement par renommage, disquettes montées protégées | Écrit pour le port, sur `CTFTPDaemon` de Circle (`lib/net/tftpdaemon.cpp`) ; appels de FatFs comme Circle `addon/tftpfileserver/tftpfatfsfileserver.cpp` |
 | `main.cpp` | Point d'entrée | **Copie à l'identique** de circle-stdlib `samples/03-stdio-fatfs/main.cpp` |
 | `kernel.h` | Classe du kernel | Structure reprise de circle-stdlib `samples/03-stdio-fatfs/kernel.h` |
 | `kernel.cpp` | Cœur 0 (clavier USB, son HDMI, Wi-Fi, cadence 50 Hz, arrêt Ctrl+Alt+Fin) et cœur 1 (émulation), affichage `pixels=` / `couleurs=` | Motifs repris de circle-stdlib `samples/03-stdio-fatfs` (application, SD, stdio) et `include/circle_stdlib_app.h` (`CStdlibAppNetwork`, démarrage du Wi-Fi), Circle `doc/multicore.txt` (`CMultiCoreSupport`), Circle `sample/08-usbkeyboard` (clavier brut, branchement à chaud), Circle `sample/34-sounddevices` (son HDMI en file d'attente) ; table clavier = `qwerty_tab` de Phosphoric `src/io/keyboard.c` (d'après Oricutron), transposée en codes HID USB ; touches F5 / Maj+F5 / F8 comme Phosphoric `main.c` ; rapport HID brut transmis à LOCI comme `loci_sync_kbd_from_sdl` |
 | `Makefile` | Construction de `kernel.img` | Repris de circle-stdlib `samples/03-stdio-fatfs/Makefile` |
-| `sdcard/cmdline.txt`, `sdcard/config.txt`, `sdcard/wpa_supplicant.conf` | Options de démarrage, modèle de configuration Wi-Fi | Écrits pour le port (options Circle documentées dans `doc/cmdline.txt` de Circle) |
+| `sdcard/cmdline.txt`, `sdcard/config.txt`, `sdcard/oric.cfg`, `sdcard/wpa_supplicant.conf` | Options de démarrage, modèle de configuration Wi-Fi | Écrits pour le port (options Circle documentées dans `doc/cmdline.txt` de Circle) |
 | `importer_phosphoric.sh` | Copie des fichiers de Phosphoric depuis un clone | Écrit pour le port |
 
 Versions validées : circle-stdlib `4fbab62` (2026-09-25), Circle `7a81e1b`

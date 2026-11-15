@@ -97,7 +97,17 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   pour la cadence de Phosphoric, 9600 bauds). Avec le modem, il est « 1: » et
   la clé devient « 2: » (sans lui, la clé est « 1: ») : « 0: » est le seul
   repère fixe.
-- Heure (avec le modem seulement) : NTP (`ntp=pool.ntp.org`) dès que le
+- `tftp=192.168.1.20` : serveur TFTP de toute la carte (`tftp.cpp`), pour
+  cette adresse seulement ; démarre le Wi-Fi même sans modem. Fichiers lus
+  ou reçus en entier en mémoire (32 Mo au plus), carte touchée seulement
+  quand le cœur 1 est entre deux trames (`WaitEmulationIdle`, sans rendre la
+  main) ; fichier reçu écrit en `x.nouveau`, l'ancien renommé `x.ancien`
+  puis effacé. Disquette montée (Microdisc ou LOCI,
+  `oric_machine_disk_mounted`) : lecture permise (pistes en attente
+  réécrites avant), remplacement refusé. Nouveau noyau : Ctrl+Alt+Suppr.
+  Client sur la RPI 400 : `curl --tftp-no-options -T f tftp://IP/chemin`
+  (`-o f` pour lire). Chaque transfert dans le journal.
+- Heure (avec le réseau : modem ou TFTP) : NTP (`ntp=pool.ntp.org`) dès que le
   Wi-Fi a son adresse ; `fuseau=` règle POSIX de `TZ` (défaut
   `CET-1CEST,M3.5.0,M10.5.0/3`). `UpdateClock` (cœur 0, chaque seconde)
   applique le décalage à `CTimer` (il garde l'heure locale : `SetTimeZone`
@@ -133,10 +143,12 @@ mesure ajoutée par appui),
 | `locidisk.c/.h` | `locidisk=0:/x.dsk` : A: de LOCI monté, XRAM du menu, démarrage direct (comme le menu puis Échap) |
 | `journal.cpp/.h` | journal en mémoire (verrou entre cœurs), écrit par le cœur 0 |
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
+| `tftp.cpp/.h` | serveur TFTP de la carte SD (`tftp=`), tâche du cœur 0 |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
 | `main.cpp` | copie circle-stdlib |
 | `installer_carte.sh`, `sauvegarde_disquettes.py` | installation sur la carte, sauvegarde des fichiers écrits sur l'Oric |
 | `Makefile`, `sdcard/`, `README.md`, `SOURCES.md`, `docs/` | |
+| `bureau/` | patchs du port reportés dans Phosphoric (versions Windows et web, `construire.sh`), prêts pour bmarty |
 
 ## Points techniques
 
@@ -214,7 +226,7 @@ mesure ajoutée par appui),
   `addon/wlan` avec `EXTRAINCLUDE` (ci-dessus). Les autres bibliothèques de
   Circle liées n'utilisent pas `setjmp`.
 
-## État (05/11/2026, fin d'après-midi)
+## État (15/11/2026)
 
 - Pi 3B+, LOCI, CP/A : image, son, clavier, F8 répétés (puis Échap), stable.
   À 1400 MHz : ~6,7 ms/trame en BASIC, ~6,9 ms avec LOCI (budget 20 ms).
@@ -224,13 +236,12 @@ mesure ajoutée par appui),
   11 min : 5272 trames, aucune refusée, collages de la vitrine (1024 touches)
   sans perte. Le DNS de Circle ne connaît pas les noms de la box : le nom doit
   être dans `HOSTS` de la disquette (Pierre le tient hors de Git).
-- Rappel automatique de REMOTE (cpa-oric 359f59c) : session de 3 h 36 sur la
-  3B+, liaison tombée, l'Oric a rappelé mais plus rien n'est passé. Défaut de
-  CP/A (`sr_rap` jetait le CONNECT immédiat de Phosphoric), corrigé dans
-  `src/serial.s` le 06/11/2026, vérifié sur le banc natif (démon relancé :
-  rappel, 269 trames, aucune refusée). Le message `setsockopt(6, 1) is
-  unimplemented` (TCP_NODELAY) est sans effet. Cause de la coupure non
-  trouvée (chaque côté a vu la fermeture venir de l'autre).
+- Rappel automatique de REMOTE (cpa-oric 359f59c, `sr_rap` corrigé le
+  06/11/2026) : la vitrine tourne plusieurs jours de suite sur la 3B+ ; une
+  coupure TCP éventuelle est rattrapée par le rappel, sans effet visible.
+  Cause des coupures (chaque côté voyait la fermeture venir de l'autre) non
+  recherchée plus loin : sans objet. Le message `setsockopt(6, 1) is
+  unimplemented` (TCP_NODELAY) est sans effet.
 - Corrections qui l'ont permis : pilote Wi-Fi recompilé (`jmp_buf`, voir
   Leçons) ; relais : tampon de 1600 octets par socket (Circle rend un segment
   entier par lecture) ; `[port]` dans `oric_machine_init` : `--serial-buffer
@@ -244,12 +255,14 @@ mesure ajoutée par appui),
   bmarty) : ACIA de LOCI qui écrase les octets non lus (contourné), ACIA
   cadencée (contourné), disquettes non réécrites (contourné), pas de
   montage au démarrage (`locidisk`), `+++` non reconnu sur une ligne calme
-  (contourné), cassette interceptée sous ROMDIS (contourné).
+  (contourné), cassette interceptée sous ROMDIS (contourné), débordement
+  de la dernière instruction de chaque trame perdu (point 7, contourné ;
+  VSYNC.COM de CP/A). Les mêmes corrections, en patchs de Phosphoric, sont
+  dans `bureau/`.
 - Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
   MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
   pistes changées réécrites sur place 2 s après la dernière écriture (banc
-  natif : identique à `sedoric_save`). À essayer sur la 3B+ (3ᵉ point de
-  `docs/phosphoric-f8.md`).
+  natif : identique à `sedoric_save`) ; 3ᵉ point de `docs/phosphoric-f8.md`.
 
 ## Banc d'essai natif (sans la Pi)
 
@@ -293,7 +306,7 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    vrai LOCI (ACIA du firmware, USB) n'en a pas. Mesuré sur le banc natif
    (collage de 980 caractères, contre-pression) : écran complet 5,6 s → 1,9 s,
    police 5,4 s → 2,3 s, écran après collage 3,4 s → 0,6 s, aucune perte.
-   **Fait (05/11/2026), à essayer sur la 3B+** : `[port]` par `--wrap` de
+   **Fait (05/11/2026), en service (vitrine)** : `[port]` par `--wrap` de
    `acia_write` (`oric_machine.c`), option `modemcadence=1` ; 2ᵉ point de
    `docs/phosphoric-f8.md`.
 2. **Lecture anticipée par le cœur 0**, indispensable avec le point 1 : sans
@@ -302,9 +315,18 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    lui-même les sockets (`recv` non bloquant) dans le tampon de
    `netrelay.cpp` ; le cœur 1 ne consulterait que ce tampon (une file à un
    écrivain et un lecteur), sans relais pour `poll` ni `recv`. **Fait
-   (05/11/2026), à essayer** : files de réception et d'émission dans
+   (05/11/2026), en service** : files de réception et d'émission dans
    `netrelay.cpp` (voir Points techniques).
 3. Envoyer `docs/phosphoric-f8.md` à bmarty (Pierre).
 4. Pour CP/A : « LOCI allégé » (API fichiers seule, servie depuis la SD).
 5. Ouverts : pas de menu de choix des supports sans LOCI ; `scaling_kernel=8`
    à essayer.
+6. **Serveur TFTP** (`tftp=`) : fait le 15/11/2026. Reste, côté cpa-oric : un
+   script qui récupère par TFTP les `.dsk` de la carte (fichiers ajoutés sur
+   l'Oric) avant d'y envoyer une nouvelle version de CP/A (comme
+   `sauvegarde_disquettes.py` aujourd'hui avec la carte en main). La
+   disquette de démarrage étant montée, la remplacer demande de démarrer sur
+   une autre ou sans disquette.
+7. Idées : Ethernet de la 3B+ pour le réseau ; manette USB → joystick IJK ;
+   son sur la prise jack ; imprimante vers un fichier ; instantanés par
+   Ctrl+Alt+touche.

@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #define DISQUETTE_DELAI_TRAMES  100     /* 2 s sans écriture */
 #define NB_LECTEURS             4
@@ -185,6 +186,39 @@ void disquette_service(emulator_t* emu) {
     }
     if (s_calme < 0 || ++s_calme < DISQUETTE_DELAI_TRAMES) return;
     disquette_flush(emu);
+}
+
+/* Chemin ramené à une forme comparable : sans « SD: » ni « / » ou « ./ » en
+ * tête, « / » doubles réduits, minuscules (FAT ne distingue pas la casse). */
+static void normaliser(const char* in, char* out, size_t n) {
+    if (strncasecmp(in, "SD:", 3) == 0) in += 3;
+    size_t k = 0;
+    while (*in && k + 1 < n) {
+        if (k == 0 || out[k - 1] == '/') {
+            if (*in == '/') { in++; continue; }
+            if (in[0] == '.' && in[1] == '/') { in += 2; continue; }
+        }
+        char c = *in++;
+        out[k++] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+    out[k] = '\0';
+}
+
+bool disquette_montee(emulator_t* emu, const char* path) {
+    char cherche[256], monte[256];
+    normaliser(path, cherche, sizeof(cherche));
+    for (int d = 0; d < NB_LECTEURS; d++) {
+        const loci_t* l = &emu->loci;
+        if (emu->card_on[CARD_IDX_loci] && l->dsk_image[d] && l->dsk_host_path[d][0]) {
+            normaliser(l->dsk_host_path[d], monte, sizeof(monte));
+            if (strcmp(cherche, monte) == 0) return true;
+        }
+        if (emu->card_on[CARD_IDX_microdisc] && emu->disks[d] && s_microdisc_path[d]) {
+            normaliser(s_microdisc_path[d], monte, sizeof(monte));
+            if (strcmp(cherche, monte) == 0) return true;
+        }
+    }
+    return false;
 }
 
 void disquette_flush(emulator_t* emu) {

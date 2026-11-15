@@ -560,6 +560,17 @@ void oric_machine_shutdown(void) {
     log_info("Shutting down emulator");
 }
 
+/* [port] Serveur TFTP (tftp.cpp), émulation entre deux trames : une
+ * disquette montée n'est pas remplacée ; avant de la lire, les pistes en
+ * attente sont réécrites (disquette.c). */
+bool oric_machine_disk_mounted(const char* path) {
+    return disquette_montee(&s_emu, path);
+}
+
+void oric_machine_flush_disks(void) {
+    disquette_flush(&s_emu);
+}
+
 /* main.c sdl_function_key : F5 = cpu_reset, Maj+F5 = cpu_nmi */
 void oric_machine_reset(void) {
     cpu_reset(&s_emu.cpu);

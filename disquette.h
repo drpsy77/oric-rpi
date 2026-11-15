@@ -24,4 +24,8 @@ void disquette_service(emulator_t* emu);
  * doit être arrêtée (entre deux trames). */
 void disquette_flush(emulator_t* emu);
 
+/* Vrai si path (relatif à la racine de la carte, « SD:/ » permis) est une
+ * disquette montée, Microdisc ou LOCI. Émulation entre deux trames. */
+bool disquette_montee(emulator_t* emu, const char* path);
+
 #endif /* DISQUETTE_H */

@@ -54,7 +54,7 @@ Table MBR, première partition en FAT32 (son nom est sans importance).
 bootcode.bin  start.elf  fixup.dat      ← circle-stdlib/libs/circle/boot
 kernel8-32.img                          ← ce dépôt
 cmdline.txt   config.txt                ← sdcard/
-firmware/  wpa_supplicant.conf          ← avec le modem (modem=1) :
+firmware/  wpa_supplicant.conf          ← avec le modem ou TFTP (modem=1, tftp=) :
                                           addon/wlan/firmware, sdcard/
 oric/basic11b.rom                       ← ROM Atmos (non fournie)
 oric/microdis.rom, oric/xxx.dsk         ← optionnel (Microdisc)
@@ -95,11 +95,33 @@ L'adresse obtenue est notée dans `oric/journal.txt`. L'ACIA du modem n'est
 pas cadencée (comme sur le vrai LOCI) ; `modemcadence=1` rend la cadence de
 Phosphoric (9600 bauds).
 
-Heure : avec le modem, la Pi la prend par NTP dès que le Wi-Fi a son adresse
+Serveur TFTP de la carte SD : `tftp=192.168.1.20` (l'adresse du seul
+ordinateur autorisé). Il démarre le Wi-Fi même sans modem et donne accès à
+toute la carte, pour mettre à jour le noyau ou les disquettes et récupérer le
+journal sans retirer la carte :
+
+```
+PI=192.168.1.50                                   # adresse de la Pi : journal
+curl --tftp-no-options -T kernel8-32.img tftp://$PI/kernel8-32.img
+curl --tftp-no-options -o journal.txt tftp://$PI/oric/journal.txt
+curl --tftp-no-options -T cpa.dsk tftp://$PI/oric/usb/cpa.dsk
+```
+
+(ou `tftp -m binary $PI -c put fichier`, paquet `tftp-hpa`).
+
+Un fichier reçu remplace l'ancien seulement s'il est arrivé en entier
+(écrit à côté, puis renommé) ; le nouveau noyau sert au prochain démarrage
+(Ctrl+Alt+Suppr). Une disquette montée par l'Oric (Microdisc ou LOCI) peut
+être lue (les écritures en attente sont faites avant), pas remplacée : pour
+mettre à jour la disquette de démarrage, démarrer sur une autre
+(`locidisk=`) ou sans disquette. Chaque transfert est noté dans le journal.
+Pas de mot de passe dans TFTP : n'activer que sur un réseau de confiance.
+
+Heure : avec le réseau (modem ou TFTP), la Pi la prend par NTP dès que le Wi-Fi a son adresse
 (`ntp=pool.ntp.org`, nouvel essai toutes les 5 min sans réponse). Les
 fichiers écrits sur la carte (disquettes, journal) sont alors datés, et le
 journal le note. Fuseau : `fuseau=` (règle POSIX de `TZ`, défaut
-`CET-1CEST,M3.5.0,M10.5.0/3`, Paris avec l'heure d'été). Sans modem, pas
+`CET-1CEST,M3.5.0,M10.5.0/3`, Paris avec l'heure d'été). Sans réseau, pas
 d'heure (dates de 1980).
 
 Démarrage direct sur une disquette, sans le menu : `locidisk=0:/cpa-en.dsk`

@@ -39,6 +39,9 @@
 //                                 des fichiers écrits sur la carte SD)
 //   fuseau=CET-1CEST,M3.5.0,M10.5.0/3  fuseau horaire, règle POSIX de TZ
 //                                 (défaut : Paris, heure d'été comprise)
+//   tftp=192.168.1.20             serveur TFTP de la carte SD (port 69), pour
+//                                 ce client seulement ; démarre le Wi-Fi même
+//                                 sans modem (tftp.cpp)
 // Ces réglages (sauf width, height, lociflash) peuvent aussi être mis dans
 // oric.cfg du dossier lociflash (0:ORIC.CFG pour l'Oric), qui l'emporte.
 // Journal de Phosphoric : oric/journal.txt (session précédente :
@@ -53,6 +56,7 @@
 #include "oric_machine.h"
 #include "journal.h"
 #include "netrelay.h"
+#include "tftp.h"
 
 #include <circle/machineinfo.h>
 #include <circle/memory.h>
@@ -100,7 +104,9 @@ CKernel::CKernel (void)
 	m_EmuCores (this),
 	m_PanicScreen (&mScreen),
 	m_bModem (false),
+	m_bTFTP (false),
 	m_bNetStarting (false),
+	m_pTFTP (0),
 	m_pNTPDaemon (0),
 	m_nClockCheck (0),
 	m_bClockSet (false),
@@ -131,7 +137,8 @@ CKernel::CKernel (void)
 }
 
 // Comme CStdlibAppNetwork::InitializeNoWaitForActivate, mais le Wi-Fi n'est
-// démarré qu'avec modem=1, et son échec n'empêche pas l'Oric de démarrer.
+// démarré qu'avec modem=1 ou tftp=, et son échec n'empêche pas l'Oric de
+// démarrer.
 // Le support multicœur se démarre en dernier (doc/multicore.txt de Circle) ;
 // le cœur 1 attend ensuite que Run() ait préparé la machine.
 bool CKernel::Initialize (void)
@@ -144,7 +151,8 @@ bool CKernel::Initialize (void)
 	ReadSettings ();		// carte SD montée : oric.cfg
 
 	m_bModem = OptionDecimal ("modem", 0) == 1;
-	if (m_bModem)
+	m_bTFTP = ParseTFTPClient ();
+	if (m_bModem || m_bTFTP)
 	{
 		m_bNetStarting =    mWLAN.Initialize ()
 				 && mNet.Initialize (FALSE)
@@ -217,6 +225,27 @@ void CKernel::ReadSettings (void)
 
 		pLine = pNext;
 	}
+}
+
+// tftp=a.b.c.d : seule adresse autorisée à lire et écrire sur la carte
+bool CKernel::ParseTFTPClient (void)
+{
+	const char *pValue = Option ("tftp");
+	if (pValue == 0)
+	{
+		return false;
+	}
+	unsigned a, b, c, d;
+	char cEnd;
+	if (   sscanf (pValue, "%u.%u.%u.%u%c", &a, &b, &c, &d, &cEnd) != 4
+	    || a > 255 || b > 255 || c > 255 || d > 255)
+	{
+		mLogger.Write (FromOric, LogWarning, "tftp=%s ignore (adresse IP attendue)", pValue);
+		return false;
+	}
+	u8 Address[4] = { (u8) a, (u8) b, (u8) c, (u8) d };
+	m_TFTPClient.Set (Address);
+	return true;
 }
 
 const char *CKernel::Option (const char *pName, const char *pDefault)
@@ -306,6 +335,27 @@ void CKernel::UpdateNetwork (void)
 	// Heure par NTP : une tâche du cœur 0, nouvel essai toutes les 5 min
 	// tant que le serveur ne répond pas, puis toutes les 15 min
 	m_pNTPDaemon = new CNTPDaemon (Option ("ntp", "pool.ntp.org"), &mNet);
+
+	// Serveur TFTP : une tâche du cœur 0 aussi
+	if (m_bTFTP)
+	{
+		m_pTFTP = new COricTFTP (&mNet, m_TFTPClient, WaitEmulationIdle);
+		CString Client;
+		m_TFTPClient.Format (&Client);
+		JournalPrintf ("TFTP : actif, client autorise %s\n", (const char *) Client);
+	}
+}
+
+// Tâche TFTP (cœur 0) : attend que le cœur 1 ait fini sa trame. Il reste
+// arrêté tant que le cœur 0 ne demande pas la suivante, donc tant que la
+// tâche ne rend pas la main à l'ordonnanceur.
+void CKernel::WaitEmulationIdle (void)
+{
+	while (s_pThis->m_nFramesDone != s_pThis->m_nFramesRequested)
+	{
+		// le cœur 1 calcule la trame (quelques ms)
+	}
+	DataMemBarrier ();
 }
 
 // Cœur 0, à chaque tour : une fois l'heure reçue (NTP, en temps universel),
@@ -383,7 +433,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	setenv ("TZ", Option ("fuseau", "CET-1CEST,M3.5.0,M10.5.0/3"), 1);
 	tzset ();
 
-	if (m_bModem && !m_bNetStarting)
+	if ((m_bModem || m_bTFTP) && !m_bNetStarting)
 	{
 		JournalPrintf ("Wi-Fi : demarrage impossible (firmware/, wpa_supplicant.conf ?)\n");
 	}

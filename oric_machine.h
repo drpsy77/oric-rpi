@@ -50,6 +50,12 @@ void oric_machine_run_frame(void);
  * modifiées réécrites, fichiers de LOCI fermés. Plus de trame ensuite. */
 void oric_machine_shutdown(void);
 
+/* Serveur TFTP (émulation entre deux trames, cœur 0) : path (relatif à la
+ * racine de la carte, « SD:/ » permis) est-il une disquette montée
+ * (Microdisc ou LOCI) ? Réécriture immédiate des pistes modifiées. */
+bool oric_machine_disk_mounted(const char* path);
+void oric_machine_flush_disks(void);
+
 /* Reset (F5 de Phosphoric) et NMI (bouton sous l'Oric, Maj+F5). */
 void oric_machine_reset(void);
 void oric_machine_nmi(void);

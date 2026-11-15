@@ -43,7 +43,7 @@ qu'un client du réseau de la maison.
 
 | Cœur | Rôle |
 |---|---|
-| 0 | clavier USB, son HDMI, réseau, température, carte SD (journal, F12), cadence 50 Hz |
+| 0 | clavier USB, son HDMI, réseau, température, carte SD (journal, F12, TFTP), cadence 50 Hz |
 | 1 | émulation (6502, LOCI, Microdisc, fichiers de l'Oric) et copie de l'image |
 | 2, 3 | arrêtés |
 
@@ -82,4 +82,8 @@ la fenêtre TCP retient l'émetteur.
 3. Wi-Fi (`modem=1`), firmware et `wpa_supplicant.conf` sur la carte SD :
    fait.
 4. Essai : `REMOTE <IP de la Pi 400>` dans CP/A vers `remote.py serve`
-   (port 2324) : à faire.
+   (port 2324) : fait. La vitrine tourne plusieurs jours de suite ; une
+   coupure TCP est rattrapée par le rappel automatique de REMOTE (CP/A).
+5. Serveur TFTP de la carte SD (`tftp=<adresse du client>`, `tftp.cpp`) :
+   tâche du cœur 0 (`CTFTPDaemon` de Circle), qui ne touche la carte
+   qu'entre deux trames ; démarre le Wi-Fi même sans modem.
