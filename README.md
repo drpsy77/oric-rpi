@@ -90,7 +90,12 @@ aucune). On les branche et les retire à chaud, sans prévenir, comme sur le
 vrai LOCI : sans clé, sa place affiche « MSC no USB key » et CP/A répond par
 une erreur. Une disquette montée depuis une clé reste en mémoire : l'Oric
 continue de s'en servir clé retirée, et les écritures sont reportées sur la
-clé quand elle revient (la même seulement, reconnue par son numéro de série). Menu : flèches, Espace pour ouvrir/choisir, Échap pour démarrer
+clé quand elle revient (la même seulement, reconnue par son numéro de série).
+Noms de fichiers sur les clés : sans accent ni caractère hors ASCII (comme
+sur le vrai LOCI, l'Oric ne peut ni les afficher ni les taper ; en exFAT, il
+n'y a pas de nom court de secours).
+
+Menu : flèches, Espace pour ouvrir/choisir, Échap pour démarrer
 l'Oric, Entrée pour reprendre la session interrompue par F8 (depuis
 Phosphoric 2.31.6).
 

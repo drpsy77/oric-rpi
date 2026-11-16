@@ -387,7 +387,15 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    même clé (numéro de série du volume), jamais sur une autre. FAT16/32
    et exFAT (`preparer_circle.sh` : la clé du vrai LOCI de Pierre est en
    exFAT, format conseillé aujourd'hui). Étape 1 (journal) vérifiée sur la
-   3B+. **Étape 2 faite (16/11/2026), à essayer** : places réservées par
+   3B+. **Étape 2 faite et vérifiée sur la 3B+ (16/11/2026)** : clé du
+   vrai LOCI (exFAT) en « 3: », DUNGEON.DSK montée en B:, clé retirée,
+   `ROGUE.TXT` sauvé sous CP/A (« write-back postponed »), clé remise
+   (même série) : « 2 track(s) written back » ; seconde clé en « 4: »
+   (`USBDIR 4:`). Noms de fichiers : ASCII seulement (FatFs en page 850 :
+   un accent arrive à l'Oric en octet > 127, illisible et impossible à
+   taper ; en exFAT pas de nom court de secours) ; décidé : rien côté
+   émulateur, les fichiers sont nommés sans accent sur la clé. Places
+   réservées par
    `oric_machine_init` (racine « USB: », `loci_add_usb_storage`), texte
    réécrit par `oric_machine_loci_key_status` (`[port]`, point 8 de
    `docs/phosphoric-f8.md`) ; `disquette.c` : `associer` relève la clé
