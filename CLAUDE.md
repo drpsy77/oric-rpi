@@ -418,11 +418,12 @@ que l'émulateur fait moins bien est à remonter à bmarty.
 9. **Ethernet de la 3B+** (décidé le 16/11/2026) : le Wi-Fi se coupe et se
    reconnecte en ~7 s plusieurs fois par heure (journal du 16/11 : 11:05,
    11:20, 11:25, sans lien avec l'USB), rattrapé par le rappel de REMOTE.
-   **Fait (16/11/2026), à essayer sur la 3B+** : `reseau=ethernet` dans
-   `cmdline.txt` (voir Carte SD) ; journal attendu : « Ethernet : liaison
-   etablie, <débit> » puis « Ethernet : connecte, adresse ... ». À
-   vérifier : mDNS (`oric.local`, filtre multicast du LAN7800), câble
-   retiré puis remis pendant REMOTE, démarrage sans câble.
+   **Fait et vérifié sur la 3B+ (16/11/2026)** : `reseau=ethernet` dans
+   `cmdline.txt` (voir Carte SD) ; « liaison etablie, 1000BASE-T
+   Full-duplex », adresse 10.0.0.27 en ~9 s, `oric.local` (mDNS), TFTP,
+   NTP, REMOTE vers `cyberlab.local:2324`. Reste à voir : câble retiré puis
+   remis pendant REMOTE, démarrage sans câble, tenue sur plusieurs heures
+   (plus de coupures comme en Wi-Fi ?).
 10. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
