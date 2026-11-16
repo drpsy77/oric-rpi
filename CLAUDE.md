@@ -103,9 +103,17 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   pour la cadence de Phosphoric, 9600 bauds). Avec le modem, il est « 1: » et
   la clé devient « 2: » (sans lui, la clé est « 1: ») : « 0: » est le seul
   repère fixe.
+- `reseau=ethernet` (défaut `wifi`) : liaison de la Pi pour `modem=1` et
+  `tftp=` par la prise de la 3B+ (LAN7515, pilote `lan7800` de Circle), sans
+  `firmware/` ni `wpa_supplicant.conf`. **`cmdline.txt` seulement** : le type
+  est passé au constructeur de `CStdlibAppNetwork` (`mNet` le fixe), lu par
+  `NetworkDeviceType` dans la ligne de commande (`CBcmPropertyTags`), avant
+  `mOptions` et la carte ; dans `oric.cfg`, ignoré (noté au journal). Câble
+  branché/retiré noté au journal (`IsLinkUp`, tâche PHY de Circle) ; sans
+  câble au démarrage, le DHCP réessaie.
 - `tftp=cyberlab.local` (nom ou adresse) : serveur TFTP de toute la carte
   (`tftp.cpp`), pour ce client seulement (nom résolu à nouveau quand une
-  autre adresse se présente) ; démarre le Wi-Fi même sans modem. Fichiers lus
+  autre adresse se présente) ; démarre le réseau même sans modem. Fichiers lus
   ou reçus en entier en mémoire (32 Mo au plus), carte touchée seulement
   quand le cœur 1 est entre deux trames (`WaitEmulationIdle`, sans rendre la
   main) ; fichier reçu écrit en `x.nouveau`, l'ancien renommé `x.ancien`
@@ -130,7 +138,7 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   n'est pas utilisé : nom figé à « raspberrypi » par circle-stdlib
   (`DEFAULT_HOSTNAME`). Pas de recherche de conflit de nom.
 - Heure (avec le réseau : modem ou TFTP) : NTP (`ntp=pool.ntp.org`) dès que le
-  Wi-Fi a son adresse ; `fuseau=` règle POSIX de `TZ` (défaut
+  réseau a son adresse ; `fuseau=` règle POSIX de `TZ` (défaut
   `CET-1CEST,M3.5.0,M10.5.0/3`). `UpdateClock` (cœur 0, chaque seconde)
   applique le décalage à `CTimer` (il garde l'heure locale : `SetTimeZone`
   puis `SetTime` UTC), dont la FatFs date les fichiers ; « Heure : ... »
@@ -145,7 +153,7 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   marche). `USBMOUNT` refuse les images de 0: (le vrai LOCI s'y est figé) :
   les disquettes en plus vont sur la clé.
 - `oric/loci/oric.cfg` (`0:ORIC.CFG` pour l'Oric) : mêmes réglages que
-  `cmdline.txt` (sauf `width`, `height`, `lociflash`), qui y sont remplacés ;
+  `cmdline.txt` (sauf `width`, `height`, `lociflash`, `reseau`), qui y sont remplacés ;
   `nom=valeur`, `#` commentaire ; noté dans le journal. Modèle `sdcard/`
   complet (toutes les options en commentaire), en ASCII (lu sous CP/A).
 - Ctrl+Alt+Suppr : disquettes réécrites, fichiers de LOCI fermés
@@ -163,7 +171,7 @@ mesure ajoutée par appui),
 
 | Fichier | Rôle |
 |---|---|
-| `kernel.cpp/.h` | cœur 0 : clavier USB, son HDMI, Wi-Fi, température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) |
+| `kernel.cpp/.h` | cœur 0 : clavier USB, son HDMI, réseau (Wi-Fi ou Ethernet), température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) |
 | `oric_machine.c/.h` | colle extraite de `main.c` de Phosphoric, API C opaque |
 | `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture), cœur 1 entre deux trames |
 | `locidisk.c/.h` | `locidisk=0:/x.dsk` : A: de LOCI monté, XRAM du menu, démarrage direct (comme le menu puis Échap) |
@@ -407,13 +415,14 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    pendant une copie (cœur 1 en plein transfert), vérifié : « umsd: CBW
    transfer failed », erreur rendue, pas de blocage ; disquette de la clé
    réécrite à son retour (2 puis 7 pistes).
-9. **Ethernet de la 3B+** (décidé le 16/11/2026, prochaine étape) : le
-   Wi-Fi se coupe et se reconnecte en ~7 s plusieurs fois par heure
-   (journal du 16/11 : 11:05, 11:20, 11:25, sans lien avec l'USB), rattrapé
-   par le rappel de REMOTE. Circle : `NetDeviceTypeEthernet` (LAN7515 de la
-   3B+, pilote `lan7800` de Circle) au lieu du WLAN ; à voir : choix par
-   option (`reseau=ethernet|wifi`), firmware Wi-Fi inutile alors, câble
-   débranché.
+9. **Ethernet de la 3B+** (décidé le 16/11/2026) : le Wi-Fi se coupe et se
+   reconnecte en ~7 s plusieurs fois par heure (journal du 16/11 : 11:05,
+   11:20, 11:25, sans lien avec l'USB), rattrapé par le rappel de REMOTE.
+   **Fait (16/11/2026), à essayer sur la 3B+** : `reseau=ethernet` dans
+   `cmdline.txt` (voir Carte SD) ; journal attendu : « Ethernet : liaison
+   etablie, <débit> » puis « Ethernet : connecte, adresse ... ». À
+   vérifier : mDNS (`oric.local`, filtre multicast du LAN7800), câble
+   retiré puis remis pendant REMOTE, démarrage sans câble.
 10. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne

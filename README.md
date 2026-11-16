@@ -56,8 +56,8 @@ Table MBR, première partition en FAT32 (son nom est sans importance).
 bootcode.bin  start.elf  fixup.dat      ← circle-stdlib/libs/circle/boot
 kernel8-32.img                          ← ce dépôt
 cmdline.txt   config.txt                ← sdcard/
-firmware/  wpa_supplicant.conf          ← avec le modem ou TFTP (modem=1, tftp=) :
-                                          addon/wlan/firmware, sdcard/
+firmware/  wpa_supplicant.conf          ← avec le modem ou TFTP (modem=1, tftp=),
+                                          en Wi-Fi : addon/wlan/firmware, sdcard/
 oric/basic11b.rom                       ← ROM Atmos (non fournie)
 oric/microdis.rom, oric/xxx.dsk         ← optionnel (Microdisc)
 oric/xxx.tap                            ← optionnel (cassette)
@@ -105,7 +105,15 @@ LOCI ; c'est la Pi qui se connecte au Wi-Fi. Il faut à la racine de la carte
 le dossier `firmware/` (fichiers `brcmfmac*`, obtenus par `make firmware` dans
 `libs/circle/addon/wlan/firmware` de circle-stdlib) et `wpa_supplicant.conf`
 (modèle dans `sdcard/`, à compléter avec le nom du réseau et le mot de passe).
-L'adresse obtenue est notée dans `oric/journal.txt`. L'ACIA du modem n'est
+L'adresse obtenue est notée dans `oric/journal.txt`.
+
+Ethernet au lieu du Wi-Fi (prise de la 3B+) : `reseau=ethernet` dans
+`cmdline.txt` (pas dans `oric.cfg` : le choix est fait avant la lecture de
+la carte). Ni `firmware/` ni `wpa_supplicant.conf` alors ; adresse par DHCP,
+câble branché et retiré notés dans le journal. Sans câble au démarrage, le
+réseau démarre quand on le branche. Le Zero 2 W n'a pas de prise Ethernet.
+
+L'ACIA du modem n'est
 pas cadencée (comme sur le vrai LOCI) ; `modemcadence=1` rend la cadence de
 Phosphoric (9600 bauds).
 
@@ -118,7 +126,7 @@ box.
 
 Serveur TFTP de la carte SD : `tftp=cyberlab.local` (nom ou adresse du seul
 ordinateur autorisé ; le nom est cherché à nouveau si son adresse change).
-Il démarre le Wi-Fi même sans modem et donne accès à
+Il démarre le réseau même sans modem et donne accès à
 toute la carte, pour mettre à jour le noyau ou les disquettes et récupérer le
 journal sans retirer la carte :
 
@@ -163,7 +171,7 @@ montre le menu avec A: rempli, `USBMOUNT` monte les autres depuis la clé.
 
 Réglages modifiables depuis l'Oric : `oric/loci/oric.cfg` (`0:ORIC.CFG` pour
 LOCI), mêmes noms que dans `cmdline.txt`, qu'ils remplacent (sauf `width`,
-`height`, `lociflash`). Modèle complet (toutes les options, en commentaire,
+`height`, `lociflash`, `reseau`). Modèle complet (toutes les options, en commentaire,
 en ASCII pour CP/A) dans `sdcard/`.
 
 Mode de l'écran (50 ou 60 Hz, 720p, 1080p, 576p) : blocs à choisir dans

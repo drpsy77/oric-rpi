@@ -59,6 +59,7 @@ private:
 	void ApplyRequests (void);
 	void SetupDisplay (void);
 	void UpdateNetwork (void);
+	const char *NetworkName (void) const;	// « Wi-Fi » ou « Ethernet » (reseau=)
 	void UpdateClock (void);
 	void Blit (void);
 	void WritePerf (void);
@@ -87,15 +88,16 @@ private:
 	CPanicScreen m_PanicScreen;
 
 	// Modem Wi-Fi (modem=1), serveur TFTP (tftp=) : réseau démarré sans
-	// attendre la connexion
+	// attendre la connexion, en Wi-Fi ou en Ethernet (reseau=, mDeviceType)
 	bool m_bModem;
 	bool m_bTFTP;
 	bool m_bNetStarting;
+	bool m_bLinkUp;					// Ethernet : câble branché
 	class COricTFTP *m_pTFTP;
 	class COricMDNS *m_pMDNS;			// nom.local, noms en .local
 	class COricWeb *m_pWeb;				// page web de la carte (web=)
 
-	// Heure : NTP dès que le Wi-Fi est prêt (ntp=), fuseau de fuseau= appliqué
+	// Heure : NTP dès que le réseau est prêt (ntp=), fuseau de fuseau= appliqué
 	// à l'horloge de Circle (dates des fichiers de la carte SD)
 	CNTPDaemon *m_pNTPDaemon;
 	unsigned m_nClockCheck;				// dernier contrôle du fuseau

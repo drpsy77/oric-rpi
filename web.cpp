@@ -714,7 +714,7 @@ THTTPStatus COricWeb::Redemarrer (const char *pFormData, CPage *pPage)
 	pPage->Texte ("<meta http-equiv=\"refresh\" content=\"30;url=/\">"
 		      "<h1>Redémarrage</h1><section><p>Disquettes réécrites, puis "
 		      "redémarrage de la Pi. Cette page se recharge dans 30 s "
-		      "(le temps que le Wi-Fi revienne).</p>"
+		      "(le temps que le réseau revienne).</p>"
 		      "<p><a href=\"/\">Retour à la carte</a></p></section>");
 	Fin (pPage);
 	return HTTPOK;

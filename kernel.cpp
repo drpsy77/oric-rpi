@@ -31,6 +31,11 @@
 //   modem=1                       modem Wi-Fi de LOCI (picowifi de Phosphoric,
 //                                 ACIA en $0380) ; firmware/ et
 //                                 wpa_supplicant.conf à la racine de la carte
+//                                 (sauf reseau=ethernet)
+//   reseau=wifi|ethernet          liaison de la Pi pour modem=1 et tftp=
+//                                 (défaut wifi) ; ethernet : prise de la 3B+
+//                                 (LAN7515), sans firmware/ ni wpa_supplicant ;
+//                                 cmdline.txt seulement (pas oric.cfg)
 //   modemcadence=1                ACIA du modem cadencée sur son débit (9600
 //                                 bauds) ; défaut 0 : sans cadence, comme LOCI
 //   clesusb=apres|remplace|non    avec loci=1 : vraies clés USB de la Pi (deux,
@@ -45,14 +50,14 @@
 //                                 (défaut : Paris, heure d'été comprise)
 //   tftp=cyberlab.local           serveur TFTP de la carte SD (port 69), pour
 //                                 ce client seulement (nom ou adresse) ;
-//                                 démarre le Wi-Fi même sans modem (tftp.cpp)
+//                                 démarre le réseau même sans modem (tftp.cpp)
 //   web=80                        avec tftp= : page web de la carte SD sur ce
 //                                 port (liste, lecture, envoi, état,
 //                                 redémarrage), même client seulement (web.cpp)
 //   nom=oric                      avec le réseau : nom de la Pi (oric.local,
 //                                 mDNS) ; les noms en .local des autres
 //                                 machines sont aussi trouvés (mdns.cpp)
-// Ces réglages (sauf width, height, lociflash) peuvent aussi être mis dans
+// Ces réglages (sauf width, height, lociflash, reseau) peuvent aussi être mis dans
 // oric.cfg du dossier lociflash (0:ORIC.CFG pour l'Oric), qui l'emporte.
 // Journal de Phosphoric : oric/journal.txt (session précédente :
 // oric/journal-precedent.txt). Émulation sur le cœur 1, le reste sur le cœur 0.
@@ -71,7 +76,9 @@
 #include "web.h"
 #include "cles.h"
 
+#include <circle/bcmpropertytags.h>
 #include <circle/machineinfo.h>
+#include <circle/netdevice.h>
 #include <circle/memory.h>
 #include <circle/synchronize.h>
 #include <circle/sound/hdmisoundbasedevice.h>
@@ -111,14 +118,45 @@ void CEmuCores::Run (unsigned nCore)
 	}
 }
 
+// reseau= : Wi-Fi (défaut) ou Ethernet. Le type de périphérique est fixé à
+// la construction de CNetSubSystem (membre de CStdlibAppNetwork), avant que
+// mOptions existe et que la carte SD soit montée : la ligne de commande est
+// lue ici directement (comme CKernelOptions), donc cmdline.txt seulement.
+static TNetDeviceType NetworkDeviceType (void)
+{
+	static TPropertyTagCommandLine TagCommandLine;	// 2 Ko : pas sur la pile
+	CBcmPropertyTags Tags;
+	if (   !Tags.GetTag (PROPTAG_GET_COMMAND_LINE, &TagCommandLine, sizeof TagCommandLine)
+	    || TagCommandLine.Tag.nValueLength >= sizeof TagCommandLine.String)
+	{
+		return NetDeviceTypeWLAN;
+	}
+	const char *pLine = (const char *) TagCommandLine.String;
+	TagCommandLine.String[TagCommandLine.Tag.nValueLength] = '\0';
+
+	static const char Option[] = "reseau=ethernet";
+	for (const char *p = pLine; *p != '\0'; p++)
+	{
+		if (   (p == pLine || p[-1] == ' ' || p[-1] == '\n')
+		    && strncmp (p, Option, sizeof Option - 1) == 0
+		    && (p[sizeof Option - 1] == '\0' || p[sizeof Option - 1] == ' '
+			|| p[sizeof Option - 1] == '\n'))
+		{
+			return NetDeviceTypeEthernet;
+		}
+	}
+	return NetDeviceTypeWLAN;
+}
+
 CKernel::CKernel (void)
-:	CStdlibAppNetwork (FromOric, CSTDLIBAPP_DEFAULT_PARTITION, 0, 0, 0, 0, NetDeviceTypeWLAN),
+:	CStdlibAppNetwork (FromOric, CSTDLIBAPP_DEFAULT_PARTITION, 0, 0, 0, 0, NetworkDeviceType ()),
 	m_CPUThrottle (CPUSpeedMaximum),
 	m_EmuCores (this),
 	m_PanicScreen (&mScreen),
 	m_bModem (false),
 	m_bTFTP (false),
 	m_bNetStarting (false),
+	m_bLinkUp (false),
 	m_pTFTP (0),
 	m_pMDNS (0),
 	m_pWeb (0),
@@ -153,9 +191,11 @@ CKernel::CKernel (void)
 	mActLED.Blink (5);	// show we are alive
 }
 
-// Comme CStdlibAppNetwork::InitializeNoWaitForActivate, mais le Wi-Fi n'est
+// Comme CStdlibAppNetwork::InitializeNoWaitForActivate, mais le réseau n'est
 // démarré qu'avec modem=1 ou tftp=, et son échec n'empêche pas l'Oric de
-// démarrer.
+// démarrer. En Ethernet (reseau=ethernet), ni pilote Wi-Fi ni wpa_supplicant :
+// le LAN7515 de la 3B+ est un périphérique USB, trouvé par la pile réseau
+// (CNetDeviceLayer::Process) dès que l'USB l'a énuméré.
 // Le support multicœur se démarre en dernier (doc/multicore.txt de Circle) ;
 // le cœur 1 attend ensuite que Run() ait préparé la machine.
 bool CKernel::Initialize (void)
@@ -171,13 +211,15 @@ bool CKernel::Initialize (void)
 	m_bTFTP = Option ("tftp") != 0 && *Option ("tftp") != '\0';
 	if (m_bModem || m_bTFTP)
 	{
-		m_bNetStarting =    mWLAN.Initialize ()
+		bool bWLAN = mDeviceType == NetDeviceTypeWLAN;
+		m_bNetStarting =    (!bWLAN || mWLAN.Initialize ())
 				 && mNet.Initialize (FALSE)
-				 && mWPASupplicant.Initialize ();
+				 && (!bWLAN || mWPASupplicant.Initialize ());
 		if (!m_bNetStarting)
 		{
-			mLogger.Write (FromOric, LogWarning,
-				       "Wi-Fi indisponible (firmware/ et wpa_supplicant.conf sur la carte SD ?)");
+			mLogger.Write (FromOric, LogWarning, bWLAN
+				       ? "Wi-Fi indisponible (firmware/ et wpa_supplicant.conf sur la carte SD ?)"
+				       : "Ethernet indisponible");
 		}
 	}
 
@@ -312,9 +354,35 @@ int CPanicScreen::Write (const void *pBuffer, size_t nCount)
 	return nCount;
 }
 
-// Cœur 0 : le réseau est prêt dès que le Wi-Fi a une adresse (DHCP).
+const char *CKernel::NetworkName (void) const
+{
+	return mDeviceType == NetDeviceTypeEthernet ? "Ethernet" : "Wi-Fi";
+}
+
+// Cœur 0 : le réseau est prêt dès que la Pi a une adresse (DHCP).
 void CKernel::UpdateNetwork (void)
 {
+	// Ethernet : câble branché ou retiré (état lu par la tâche PHY de Circle
+	// toutes les 2 s). Sans câble au démarrage, le DHCP réessaie : le réseau
+	// démarre quand on le branche. Bail gardé si le câble est retiré.
+	if (mDeviceType == NetDeviceTypeEthernet && (m_bModem || m_bTFTP))
+	{
+		CNetDevice *pDevice = CNetDevice::GetNetDevice (NetDeviceTypeEthernet);
+		if (pDevice != 0 && pDevice->IsLinkUp () != (boolean) m_bLinkUp)
+		{
+			m_bLinkUp = !m_bLinkUp;
+			if (m_bLinkUp)
+			{
+				JournalPrintf ("Ethernet : liaison etablie, %s\n",
+					       CNetDevice::GetSpeedString (pDevice->GetLinkSpeed ()));
+			}
+			else
+			{
+				JournalPrintf ("Ethernet : liaison perdue (cable ?)\n");
+			}
+		}
+	}
+
 	if (!m_bNetStarting || !mNet.IsRunning ())
 	{
 		return;
@@ -326,7 +394,7 @@ void CKernel::UpdateNetwork (void)
 
 	CString IPAddress;
 	mNet.GetConfig ()->GetIPAddress ()->Format (&IPAddress);
-	JournalPrintf ("Wi-Fi : connecte, adresse %s\n", (const char *) IPAddress);
+	JournalPrintf ("%s : connecte, adresse %s\n", NetworkName (), (const char *) IPAddress);
 
 	// Heure par NTP : une tâche du cœur 0, nouvel essai toutes les 5 min
 	// tant que le serveur ne répond pas, puis toutes les 15 min
@@ -404,8 +472,8 @@ void CKernel::WebStatus (CString *pHTML)
 
 	CString IP;
 	k->mNet.GetConfig ()->GetIPAddress ()->Format (&IP);
-	Ligne.Format ("<tr><th>Réseau</th><td>%s.local, %s%s</td></tr>",
-		      k->Option ("nom", "oric"), (const char *) IP,
+	Ligne.Format ("<tr><th>Réseau</th><td>%s.local, %s, %s%s</td></tr>",
+		      k->Option ("nom", "oric"), (const char *) IP, k->NetworkName (),
 		      k->m_bModem ? ", modem de LOCI" : "");
 	pHTML->Append (Ligne);
 
@@ -527,9 +595,32 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	setenv ("TZ", Option ("fuseau", "CET-1CEST,M3.5.0,M10.5.0/3"), 1);
 	tzset ();
 
-	if ((m_bModem || m_bTFTP) && !m_bNetStarting)
+	// reseau= : lu dans cmdline.txt à la construction (NetworkDeviceType)
+	const char *pReseau = mOptions.GetAppOptionString ("reseau");
+	if (   pReseau != 0 && strcmp (pReseau, "wifi") != 0
+	    && strcmp (pReseau, "ethernet") != 0)
 	{
-		JournalPrintf ("Wi-Fi : demarrage impossible (firmware/, wpa_supplicant.conf ?)\n");
+		JournalPrintf ("reseau=%s inconnu (wifi ou ethernet) : Wi-Fi\n", pReseau);
+	}
+	for (unsigned i = 0; i < s_nSettings; i++)
+	{
+		if (strcmp (s_pSettingName[i], "reseau") == 0)
+		{
+			JournalPrintf ("oric.cfg : reseau= ignore (cmdline.txt seulement)\n");
+		}
+	}
+	if (m_bModem || m_bTFTP)
+	{
+		if (!m_bNetStarting)
+		{
+			JournalPrintf (mDeviceType == NetDeviceTypeWLAN
+				       ? "Wi-Fi : demarrage impossible (firmware/, wpa_supplicant.conf ?)\n"
+				       : "Ethernet : demarrage impossible\n");
+		}
+		else
+		{
+			JournalPrintf ("%s : en attente d'une adresse (DHCP)\n", NetworkName ());
+		}
 	}
 
 	oric_media_t Media;
@@ -613,7 +704,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 
 	while (true)
 	{
-		mScheduler.Yield ();		// pile réseau, Wi-Fi
+		mScheduler.Yield ();		// pile réseau, Wi-Fi ou Ethernet
 		NetRelayService ();		// sockets et fermetures demandés par le cœur 1
 		UpdateNetwork ();
 		UpdateClock ();
