@@ -87,12 +87,14 @@ boolean COricTFTP::IsAccessAllowed (const CIPAddress *pForeignIP,
 	CString IP;
 	pForeignIP->Format (&IP);
 
-	if (*pForeignIP != m_Client)
+	// m_Client vide avant la première résolution (et comparer une adresse
+	// vide est une assertion de Circle : panique)
+	if (!m_Client.IsSet () || *pForeignIP != m_Client)
 	{
 		// Nom du client : adresse peut-être changée (ou pas encore connue)
 		CIPAddress Address;
-		if (ResolveHostName (m_pNetSubSystem, m_pClientName, &Address)
-		    && Address != m_Client)
+		if (   ResolveHostName (m_pNetSubSystem, m_pClientName, &Address)
+		    && (!m_Client.IsSet () || Address != m_Client))
 		{
 			m_Client.Set (Address);
 			CString New;
@@ -101,7 +103,7 @@ boolean COricTFTP::IsAccessAllowed (const CIPAddress *pForeignIP,
 				       (const char *) New);
 		}
 	}
-	if (*pForeignIP != m_Client)
+	if (!m_Client.IsSet () || *pForeignIP != m_Client)
 	{
 		JournalPrintf ("TFTP : %s refuse (client %s, %s attendu)\n", pFileName,
 			       (const char *) IP, m_pClientName);
