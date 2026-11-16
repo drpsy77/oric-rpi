@@ -22,6 +22,7 @@
 // pleine, il ne lit plus et la fenêtre TCP retient l'émetteur.
 //
 #include "netrelay.h"
+#include "mdns.h"
 
 #include <circle/multicore.h>
 #include <circle/netdevice.h>
@@ -587,6 +588,19 @@ struct TAddrInfoArgs { const char *node, *service; const struct addrinfo *hints;
 static long CallGetAddrInfo (void *p)
 {
 	TAddrInfoArgs *a = (TAddrInfoArgs *) p;
+	// Nom en .local (ATDT, HOSTS de CP/A) : inconnu du DNS de la box, trouvé
+	// par mDNS (mdns.cpp), puis passé en chiffres à circle-newlib
+	if (a->node != 0 && IsLocalHostName (a->node))
+	{
+		CIPAddress Address;
+		if (!COricMDNS::Resolve (a->node, &Address))
+		{
+			return EAI_NONAME;
+		}
+		CString Text;
+		Address.Format (&Text);
+		return __real_getaddrinfo (Text, a->service, a->hints, a->res);
+	}
 	return __real_getaddrinfo (a->node, a->service, a->hints, a->res);
 }
 int __wrap_getaddrinfo (const char *node, const char *service,

@@ -13,7 +13,6 @@
 #include <circle/cputhrottle.h>
 #include <circle/multicore.h>
 #include <circle/net/ntpdaemon.h>
-#include <circle/net/ipaddress.h>
 
 class CKernel;
 
@@ -69,7 +68,6 @@ private:
 
 	// Réglages : oric.cfg (dossier de lociflash=) d'abord, puis cmdline.txt
 	void ReadSettings (void);
-	bool ParseTFTPClient (void);
 	static void WaitEmulationIdle (void);	// tâche TFTP (cœur 0)
 	const char *Option (const char *pName, const char *pDefault = 0);
 	unsigned OptionDecimal (const char *pName, unsigned nDefault);
@@ -91,8 +89,8 @@ private:
 	bool m_bModem;
 	bool m_bTFTP;
 	bool m_bNetStarting;
-	CIPAddress m_TFTPClient;			// seul client autorisé
 	class COricTFTP *m_pTFTP;
+	class COricMDNS *m_pMDNS;			// nom.local, noms en .local
 
 	// Heure : NTP dès que le Wi-Fi est prêt (ntp=), fuseau de fuseau= appliqué
 	// à l'horloge de Circle (dates des fichiers de la carte SD)

@@ -97,16 +97,24 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   pour la cadence de Phosphoric, 9600 bauds). Avec le modem, il est « 1: » et
   la clé devient « 2: » (sans lui, la clé est « 1: ») : « 0: » est le seul
   repère fixe.
-- `tftp=192.168.1.20` : serveur TFTP de toute la carte (`tftp.cpp`), pour
-  cette adresse seulement ; démarre le Wi-Fi même sans modem. Fichiers lus
+- `tftp=cyberlab.local` (nom ou adresse) : serveur TFTP de toute la carte
+  (`tftp.cpp`), pour ce client seulement (nom résolu à nouveau quand une
+  autre adresse se présente) ; démarre le Wi-Fi même sans modem. Fichiers lus
   ou reçus en entier en mémoire (32 Mo au plus), carte touchée seulement
   quand le cœur 1 est entre deux trames (`WaitEmulationIdle`, sans rendre la
   main) ; fichier reçu écrit en `x.nouveau`, l'ancien renommé `x.ancien`
   puis effacé. Disquette montée (Microdisc ou LOCI,
   `oric_machine_disk_mounted`) : lecture permise (pistes en attente
   réécrites avant), remplacement refusé. Nouveau noyau : Ctrl+Alt+Suppr.
-  Client sur la RPI 400 : `curl --tftp-no-options -T f tftp://IP/chemin`
-  (`-o f` pour lire). Chaque transfert dans le journal.
+  Client sur la RPI 400 : `tftp -m binary oric.local -c get chemin`, ou
+  `curl --tftp-no-options -T f tftp://oric.local/chemin` (`-o f` pour lire).
+  Chaque transfert dans le journal.
+- `nom=oric` : mDNS du port (`mdns.cpp`, tâche du cœur 0, avec le réseau) :
+  la Pi répond à `oric.local` ; les noms en `.local` (`tftp=`, `getaddrinfo`
+  du modem dans `netrelay.cpp`, donc ATDT et `HOSTS` de CP/A) sont cherchés
+  en multicast (2 s au plus, réponses gardées 60 s). Le démon mDNS de Circle
+  n'est pas utilisé : nom figé à « raspberrypi » par circle-stdlib
+  (`DEFAULT_HOSTNAME`). Pas de recherche de conflit de nom.
 - Heure (avec le réseau : modem ou TFTP) : NTP (`ntp=pool.ntp.org`) dès que le
   Wi-Fi a son adresse ; `fuseau=` règle POSIX de `TZ` (défaut
   `CET-1CEST,M3.5.0,M10.5.0/3`). `UpdateClock` (cœur 0, chaque seconde)
@@ -144,6 +152,7 @@ mesure ajoutée par appui),
 | `journal.cpp/.h` | journal en mémoire (verrou entre cœurs), écrit par le cœur 0 |
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `tftp.cpp/.h` | serveur TFTP de la carte SD (`tftp=`), tâche du cœur 0 |
+| `mdns.cpp/.h` | mDNS : `nom.local` de la Pi, noms en `.local` des autres machines |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
 | `main.cpp` | copie circle-stdlib |
 | `installer_carte.sh`, `sauvegarde_disquettes.py` | installation sur la carte, sauvegarde des fichiers écrits sur l'Oric |
@@ -192,7 +201,9 @@ mesure ajoutée par appui),
   rendus avant les autres). Vérifié sur le banc natif (copie de Phosphoric,
   même code sous `PORT_ESC`) : REMOTE, REMOTE OFF (hangup), REMOTE.
 - Sockets de circle-newlib : pas de `O_NONBLOCK` (fcntl → ENOSYS) ; le relais
-  le mémorise et lit par `recv(MSG_DONTWAIT)`. DNS : pas de noms `.local`.
+  le mémorise et lit par `recv(MSG_DONTWAIT)`. DNS de Circle (`CDNSClient`) :
+  serveur de la box seulement, qui ne connaît ni les noms `.local` ni ceux
+  des machines ; les `.local` passent par `mdns.cpp`.
 - Écran : `config.txt` propose des blocs (A mode préféré actif, 60 Hz natif de l'écran de Pierre ; B 720p50,
   C 1080p50, D 576p50, E 720p60). 1080p50 (`hdmi_mode=31`) donnait sur
   l'écran de Pierre une ligne sur deux et un scintillement, et des couleurs
@@ -235,7 +246,8 @@ mesure ajoutée par appui),
   RPI 400 (port 2324), vitrine et VPS (cycleamen.fr/cpa/) compris. Session de
   11 min : 5272 trames, aucune refusée, collages de la vitrine (1024 touches)
   sans perte. Le DNS de Circle ne connaît pas les noms de la box : le nom doit
-  être dans `HOSTS` de la disquette (Pierre le tient hors de Git).
+  être dans `HOSTS` de la disquette (Pierre le tient hors de Git), ou être un
+  nom en `.local` (mDNS du port, 16/11/2026).
 - Rappel automatique de REMOTE (cpa-oric 359f59c, `sr_rap` corrigé le
   06/11/2026) : la vitrine tourne plusieurs jours de suite sur la 3B+ ; une
   coupure TCP éventuelle est rattrapée par le rappel, sans effet visible.

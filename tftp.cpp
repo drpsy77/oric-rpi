@@ -24,6 +24,7 @@
 // lue : les pistes en attente sont d'abord réécrites (disquette.c).
 //
 #include "tftp.h"
+#include "mdns.h"
 #include "journal.h"
 #include "oric_machine.h"
 
@@ -35,10 +36,10 @@
 
 #define MAX_FILE_SIZE	(32u << 20)
 
-COricTFTP::COricTFTP (CNetSubSystem *pNetSubSystem, const CIPAddress &rClient,
+COricTFTP::COricTFTP (CNetSubSystem *pNetSubSystem, const char *pClient,
 		      void (*pWaitIdle) (void))
 :	CTFTPDaemon (pNetSubSystem),
-	m_Client (rClient),
+	m_pClientName (pClient),
 	m_pWaitIdle (pWaitIdle),
 	m_pData (0),
 	m_nSize (0),
@@ -88,8 +89,22 @@ boolean COricTFTP::IsAccessAllowed (const CIPAddress *pForeignIP,
 
 	if (*pForeignIP != m_Client)
 	{
-		JournalPrintf ("TFTP : %s refuse (client %s non autorise)\n", pFileName,
-			       (const char *) IP);
+		// Nom du client : adresse peut-être changée (ou pas encore connue)
+		CIPAddress Address;
+		if (ResolveHostName (m_pNetSubSystem, m_pClientName, &Address)
+		    && Address != m_Client)
+		{
+			m_Client.Set (Address);
+			CString New;
+			m_Client.Format (&New);
+			JournalPrintf ("TFTP : %s a l'adresse %s\n", m_pClientName,
+				       (const char *) New);
+		}
+	}
+	if (*pForeignIP != m_Client)
+	{
+		JournalPrintf ("TFTP : %s refuse (client %s, %s attendu)\n", pFileName,
+			       (const char *) IP, m_pClientName);
 		return FALSE;
 	}
 	if (!MakePath (pFileName))

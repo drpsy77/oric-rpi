@@ -1,5 +1,5 @@
 //
-// tftp.h — Serveur TFTP de la carte SD (tftp=<adresse du client>)
+// tftp.h — Serveur TFTP de la carte SD (tftp=<client : adresse ou nom>)
 //
 // Mise à jour du noyau, des disquettes, lecture du journal sans retirer la
 // carte. Sur CTFTPDaemon de Circle (lib/net/tftpdaemon.cpp, GPL-3.0, voir
@@ -19,9 +19,12 @@
 class COricTFTP : public CTFTPDaemon
 {
 public:
+	// pClient : seul client autorisé, adresse ou nom (cyberlab.local par
+	// mDNS, sinon DNS de la box), résolu à nouveau si une autre adresse
+	// se présente (bail DHCP changé).
 	// pWaitIdle : rend la main quand le cœur 1 est entre deux trames (il le
 	// reste tant que cette tâche ne rend pas la main à l'ordonnanceur)
-	COricTFTP (CNetSubSystem *pNetSubSystem, const CIPAddress &rClient,
+	COricTFTP (CNetSubSystem *pNetSubSystem, const char *pClient,
 		   void (*pWaitIdle) (void));
 	~COricTFTP (void);
 
@@ -42,7 +45,8 @@ private:
 	void Release (void);
 
 private:
-	CIPAddress m_Client;
+	const char *m_pClientName;
+	CIPAddress m_Client;			// sa dernière adresse connue
 	void (*m_pWaitIdle) (void);
 
 	char m_Path[MaxFilenameLen + 8];	// « SD:/ » + nom

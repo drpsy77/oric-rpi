@@ -39,9 +39,12 @@
 //                                 des fichiers écrits sur la carte SD)
 //   fuseau=CET-1CEST,M3.5.0,M10.5.0/3  fuseau horaire, règle POSIX de TZ
 //                                 (défaut : Paris, heure d'été comprise)
-//   tftp=192.168.1.20             serveur TFTP de la carte SD (port 69), pour
-//                                 ce client seulement ; démarre le Wi-Fi même
-//                                 sans modem (tftp.cpp)
+//   tftp=cyberlab.local           serveur TFTP de la carte SD (port 69), pour
+//                                 ce client seulement (nom ou adresse) ;
+//                                 démarre le Wi-Fi même sans modem (tftp.cpp)
+//   nom=oric                      avec le réseau : nom de la Pi (oric.local,
+//                                 mDNS) ; les noms en .local des autres
+//                                 machines sont aussi trouvés (mdns.cpp)
 // Ces réglages (sauf width, height, lociflash) peuvent aussi être mis dans
 // oric.cfg du dossier lociflash (0:ORIC.CFG pour l'Oric), qui l'emporte.
 // Journal de Phosphoric : oric/journal.txt (session précédente :
@@ -57,6 +60,7 @@
 #include "journal.h"
 #include "netrelay.h"
 #include "tftp.h"
+#include "mdns.h"
 
 #include <circle/machineinfo.h>
 #include <circle/memory.h>
@@ -107,6 +111,7 @@ CKernel::CKernel (void)
 	m_bTFTP (false),
 	m_bNetStarting (false),
 	m_pTFTP (0),
+	m_pMDNS (0),
 	m_pNTPDaemon (0),
 	m_nClockCheck (0),
 	m_bClockSet (false),
@@ -151,7 +156,7 @@ bool CKernel::Initialize (void)
 	ReadSettings ();		// carte SD montée : oric.cfg
 
 	m_bModem = OptionDecimal ("modem", 0) == 1;
-	m_bTFTP = ParseTFTPClient ();
+	m_bTFTP = Option ("tftp") != 0 && *Option ("tftp") != '\0';
 	if (m_bModem || m_bTFTP)
 	{
 		m_bNetStarting =    mWLAN.Initialize ()
@@ -225,27 +230,6 @@ void CKernel::ReadSettings (void)
 
 		pLine = pNext;
 	}
-}
-
-// tftp=a.b.c.d : seule adresse autorisée à lire et écrire sur la carte
-bool CKernel::ParseTFTPClient (void)
-{
-	const char *pValue = Option ("tftp");
-	if (pValue == 0)
-	{
-		return false;
-	}
-	unsigned a, b, c, d;
-	char cEnd;
-	if (   sscanf (pValue, "%u.%u.%u.%u%c", &a, &b, &c, &d, &cEnd) != 4
-	    || a > 255 || b > 255 || c > 255 || d > 255)
-	{
-		mLogger.Write (FromOric, LogWarning, "tftp=%s ignore (adresse IP attendue)", pValue);
-		return false;
-	}
-	u8 Address[4] = { (u8) a, (u8) b, (u8) c, (u8) d };
-	m_TFTPClient.Set (Address);
-	return true;
 }
 
 const char *CKernel::Option (const char *pName, const char *pDefault)
@@ -336,13 +320,15 @@ void CKernel::UpdateNetwork (void)
 	// tant que le serveur ne répond pas, puis toutes les 15 min
 	m_pNTPDaemon = new CNTPDaemon (Option ("ntp", "pool.ntp.org"), &mNet);
 
+	// mDNS : la Pi répond au nom de nom= (oric.local) et trouve les autres
+	// noms en .local (tftp=, ATDT et HOSTS du modem) ; une tâche du cœur 0
+	m_pMDNS = new COricMDNS (&mNet, Option ("nom", "oric"));
+
 	// Serveur TFTP : une tâche du cœur 0 aussi
 	if (m_bTFTP)
 	{
-		m_pTFTP = new COricTFTP (&mNet, m_TFTPClient, WaitEmulationIdle);
-		CString Client;
-		m_TFTPClient.Format (&Client);
-		JournalPrintf ("TFTP : actif, client autorise %s\n", (const char *) Client);
+		m_pTFTP = new COricTFTP (&mNet, Option ("tftp"), WaitEmulationIdle);
+		JournalPrintf ("TFTP : actif, client autorise %s\n", Option ("tftp"));
 	}
 }
 

@@ -95,13 +95,21 @@ L'adresse obtenue est notée dans `oric/journal.txt`. L'ACIA du modem n'est
 pas cadencée (comme sur le vrai LOCI) ; `modemcadence=1` rend la cadence de
 Phosphoric (9600 bauds).
 
-Serveur TFTP de la carte SD : `tftp=192.168.1.20` (l'adresse du seul
-ordinateur autorisé). Il démarre le Wi-Fi même sans modem et donne accès à
+Noms en `.local` : avec le réseau (modem ou TFTP), la Pi répond au nom
+`oric.local` (`nom=` pour en choisir un autre, unique sur le réseau), et
+trouve elle-même les noms en `.local` des autres machines (mDNS, comme
+Bonjour ou Avahi) : pour `tftp=`, et pour le modem (`ATDT-cyberlab.local:2324`,
+ou un tel nom dans `HOSTS` de CP/A). Les autres noms passent par le DNS de la
+box.
+
+Serveur TFTP de la carte SD : `tftp=cyberlab.local` (nom ou adresse du seul
+ordinateur autorisé ; le nom est cherché à nouveau si son adresse change).
+Il démarre le Wi-Fi même sans modem et donne accès à
 toute la carte, pour mettre à jour le noyau ou les disquettes et récupérer le
 journal sans retirer la carte :
 
 ```
-PI=192.168.1.50                                   # adresse de la Pi : journal
+PI=oric.local                                     # ou l'adresse de la Pi : journal
 curl --tftp-no-options -T kernel8-32.img tftp://$PI/kernel8-32.img
 curl --tftp-no-options -o journal.txt tftp://$PI/oric/journal.txt
 curl --tftp-no-options -T cpa.dsk tftp://$PI/oric/usb/cpa.dsk
