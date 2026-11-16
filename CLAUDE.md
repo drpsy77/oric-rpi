@@ -236,8 +236,13 @@ mesure ajoutée par appui),
   (`p9error.h`) déborde sur son compteur. Correction : recompiler
   `addon/wlan` avec `EXTRAINCLUDE` (ci-dessus). Les autres bibliothèques de
   Circle liées n'utilisent pas `setjmp`.
+- Panique `ipaddress.cpp(62): assertion failed` : comparaison (`==`, `!=`)
+  d'un `CIPAddress` jamais rempli (aussi `IsNull`, `CopyTo`). Tester
+  `IsSet ()` d'abord. Rencontré dans `tftp.cpp` (client pas encore résolu).
+- Mise à jour du noyau par TFTP : un noyau qui plante au premier transfert
+  ne peut pas être remplacé ainsi ; carte dans le lecteur de la RPI 400.
 
-## État (15/11/2026)
+## État (16/11/2026)
 
 - Pi 3B+, LOCI, CP/A : image, son, clavier, F8 répétés (puis Échap), stable.
   À 1400 MHz : ~6,7 ms/trame en BASIC, ~6,9 ms avec LOCI (budget 20 ms).
@@ -271,6 +276,12 @@ mesure ajoutée par appui),
   de la dernière instruction de chaque trame perdu (point 7, contourné ;
   VSYNC.COM de CP/A). Les mêmes corrections, en patchs de Phosphoric, sont
   dans `bureau/`.
+- **Réseau sans retirer la carte, vérifié sur la 3B+ (16/11/2026)** : la Pi
+  répond à `oric.local` (10.0.0.23) ; `tftp=cyberlab.local` résolu par mDNS
+  (10.0.0.38) ; journal lu par TFTP (`journal.txt` ouvert compris, entier) ;
+  noyau envoyé par TFTP (1,25 Mo en ~56 s, vitrine en marche) et relu
+  identique. Mise à jour : `tftp -m binary oric.local -c put
+  kernel8-32.img`, puis Ctrl+Alt+Suppr.
 - Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
   MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
   pistes changées réécrites sur place 2 s après la dernière écriture (banc
@@ -333,12 +344,23 @@ que l'émulateur fait moins bien est à remonter à bmarty.
 4. Pour CP/A : « LOCI allégé » (API fichiers seule, servie depuis la SD).
 5. Ouverts : pas de menu de choix des supports sans LOCI ; `scaling_kernel=8`
    à essayer.
-6. **Serveur TFTP** (`tftp=`) : fait le 15/11/2026. Reste, côté cpa-oric : un
+6. **Serveur TFTP** (`tftp=`) et **mDNS** (`oric.local`, noms en `.local`) :
+   faits et vérifiés les 15 et 16/11/2026. Reste, côté cpa-oric : un
    script qui récupère par TFTP les `.dsk` de la carte (fichiers ajoutés sur
    l'Oric) avant d'y envoyer une nouvelle version de CP/A (comme
    `sauvegarde_disquettes.py` aujourd'hui avec la carte en main). La
    disquette de démarrage étant montée, la remplacer demande de démarrer sur
    une autre ou sans disquette.
-7. Idées : Ethernet de la 3B+ pour le réseau ; manette USB → joystick IJK ;
-   son sur la prise jack ; imprimante vers un fichier ; instantanés par
-   Ctrl+Alt+touche.
+7. Liste de la carte à distance : TFTP n'a pas de commande de liste.
+   Proposé : un nom réservé (ex. `oric/usb/.liste`) qui rend le contenu du
+   dossier (une vingtaine de lignes dans `tftp.cpp`) ; plus tard, une page
+   web de gestion (`CHTTPDaemon` de Circle : liste, téléchargement, envoi,
+   effacement, mêmes protections). Un serveur FTP (FileZilla) est écarté :
+   trop lourd pour le gain.
+8. Idées, par intérêt : Ethernet de la 3B+ pour le réseau (plus stable que
+   le Wi-Fi) ; manette USB → joystick IJK (déjà émulé par Phosphoric,
+   `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
+   cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
+   l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`
+   déjà lié) ; LED d'activité pendant la réécriture des disquettes ; vraie
+   clé USB comme « 1: ».
