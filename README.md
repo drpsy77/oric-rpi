@@ -95,6 +95,11 @@ Noms de fichiers sur les clés : sans accent ni caractère hors ASCII (comme
 sur le vrai LOCI, l'Oric ne peut ni les afficher ni les taper ; en exFAT, il
 n'y a pas de nom court de secours).
 
+Souris USB (avec LOCI) : branchée sur la Pi, elle est vue par l'Oric comme
+une souris branchée sur la cartouche (API de LOCI, rapport de 5 octets en
+XRAM ; branchement et retrait à chaud). Mode d'emploi pour les programmes
+et programme d'essai en BASIC : `docs/souris-loci.md`.
+
 Menu : flèches, Espace pour ouvrir/choisir, Échap pour démarrer
 l'Oric, Entrée pour reprendre la session interrompue par F8 (depuis
 Phosphoric 2.31.6).

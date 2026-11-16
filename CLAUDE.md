@@ -156,6 +156,11 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   `cmdline.txt` (sauf `width`, `height`, `lociflash`, `reseau`), qui y sont remplacés ;
   `nom=valeur`, `#` commentaire ; noté dans le journal. Modèle `sdcard/`
   complet (toutes les options en commentaire), en ASCII (lu sous CP/A).
+- Souris USB (`mouse1`, avec `loci=1`) : vue par l'API de LOCI (5 octets
+  en XRAM, `XREG` 0,0,1), comme `sdl_mouse_event` de Phosphoric ; cumuls
+  tenus par le cœur 0, différences passées par le cœur 1 en début de trame
+  (`ApplyMouse`). Protocole, piège du `POKE` et programme d'essai :
+  `docs/souris-loci.md`.
 - Ctrl+Alt+Suppr : disquettes réécrites, fichiers de LOCI fermés
   (`loci_cleanup`), journal, puis redémarrage. Ctrl+Alt+Fin : pareil, carte
   démontée (`Cleanup`), message à l'écran, LED fixe, arrêt : seul moment
@@ -171,7 +176,7 @@ mesure ajoutée par appui),
 
 | Fichier | Rôle |
 |---|---|
-| `kernel.cpp/.h` | cœur 0 : clavier USB, son HDMI, réseau (Wi-Fi ou Ethernet), température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) |
+| `kernel.cpp/.h` | cœur 0 : clavier et souris USB, son HDMI, réseau (Wi-Fi ou Ethernet), température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) |
 | `oric_machine.c/.h` | colle extraite de `main.c` de Phosphoric, API C opaque |
 | `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture), cœur 1 entre deux trames |
 | `locidisk.c/.h` | `locidisk=0:/x.dsk` : A: de LOCI monté, XRAM du menu, démarrage direct (comme le menu puis Échap) |
@@ -424,7 +429,11 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    NTP, REMOTE vers `cyberlab.local:2324`. Reste à voir : câble retiré puis
    remis pendant REMOTE, démarrage sans câble, tenue sur plusieurs heures
    (plus de coupures comme en Wi-Fi ?).
-10. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
+10. **Souris USB pour LOCI** (16/11/2026), pour l'éditeur d'écran HIRES
+   prévu dans CP/A : faite, vérifiée sur le banc natif pour le protocole
+   (programme BASIC de `docs/souris-loci.md`, souris simulée), à essayer
+   sur la 3B+ avec une vraie souris.
+11. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
    l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`

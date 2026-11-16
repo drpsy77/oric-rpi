@@ -77,6 +77,11 @@ void oric_machine_nmi(void);
 void oric_machine_loci_button(bool down);
 void oric_machine_loci_kbd_report(uint8_t modifiers, const uint8_t keys[6]);
 
+/* LOCI : souris USB vue par l'API de LOCI (5 octets en XRAM, adresse
+ * donnée par le 6502 par XREG 0,0,1). Boutons (bit 0 gauche, 1 droit,
+ * 2 milieu) et déplacements depuis le dernier appel, ajoutés modulo 256. */
+void oric_machine_loci_mou_report(uint8_t buttons, int dx, int dy, int wheel);
+
 /* Image de la dernière trame : RGB888, *w x *h pixels, lignes de 3*w octets. */
 const uint8_t* oric_machine_framebuffer(int* w, int* h);
 

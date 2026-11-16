@@ -9,6 +9,7 @@
 
 #include <circle_stdlib_app.h>
 #include <circle/usb/usbkeyboard.h>
+#include <circle/input/mouse.h>
 #include <circle/sound/soundbasedevice.h>
 #include <circle/cputhrottle.h>
 #include <circle/multicore.h>
@@ -79,6 +80,12 @@ private:
 	static void KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6]);
 	static void KeyboardRemovedHandler (CDevice *pDevice, void *pContext);
 
+	// Souris USB (mouse1) : pour LOCI, comme sur la cartouche
+	static void MouseStatusHandler (unsigned nButtons, int nDisplacementX,
+					int nDisplacementY, int nWheelMove);
+	static void MouseRemovedHandler (CDevice *pDevice, void *pContext);
+	void ApplyMouse (void);
+
 private:
 	// Pleine vitesse du processeur (sinon le firmware de la Pi 3 redescend
 	// à 600 MHz) ; ralentit si la puce dépasse socmaxtemp (défaut 60 °C)
@@ -104,6 +111,15 @@ private:
 	bool m_bClockSet;
 
 	CUSBKeyboardDevice * volatile m_pKeyboard;
+	CMouseDevice * volatile m_pMouse;
+
+	// Souris : totaux tenus par le cœur 0 (interruption USB, seul écrivain),
+	// le cœur 1 en tire les déplacements depuis la trame précédente (sans
+	// remise à zéro, donc sans course entre les cœurs)
+	volatile unsigned m_nMouseButtons;
+	volatile int m_nMouseX, m_nMouseY, m_nMouseWheel;
+	unsigned m_nMouseLastButtons;			// cœur 1
+	int m_nMouseLastX, m_nMouseLastY, m_nMouseLastWheel;
 	CSoundBaseDevice *m_pSound;
 
 	// Affichage (pixels=, couleurs=...), calculé par SetupDisplay

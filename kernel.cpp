@@ -5,6 +5,7 @@
 // (GPL-3.0, voir SOURCES.md) :
 //   - circle-stdlib samples/03-stdio-fatfs  : classe CStdlibAppStdio, SD + stdio
 //   - Circle sample/08-usbkeyboard          : clavier USB en mode brut
+//   - Circle sample/10-usbmouse             : souris USB (mouse1)
 //   - Circle sample/34-sounddevices         : son HDMI via file d'attente Write()
 // La table clavier est la table QWERTY de Phosphoric (src/io/keyboard.c,
 // elle-même reprise d'Oricutron), transposée des codes SDL en codes HID USB.
@@ -42,6 +43,8 @@
 //                                 FAT ou exFAT) servies par LOCI après lociusb
 //                                 (défaut), ou la 1re à sa place ; branchement
 //                                 et retrait à chaud (cles.cpp)
+//   (souris USB : avec loci=1, vue par l'API de LOCI, comme une souris
+//    branchée sur la cartouche ; branchement et retrait à chaud)
 //   locidisk=0:/cpa-en.dsk        avec loci=1 : image montée en A: de LOCI et
 //                                 démarrage direct dessus (sans le menu)
 //   ntp=pool.ntp.org              avec modem=1 : serveur de l'heure (dates
@@ -164,6 +167,11 @@ CKernel::CKernel (void)
 	m_nClockCheck (0),
 	m_bClockSet (false),
 	m_pKeyboard (0),
+	m_pMouse (0),
+	m_nMouseButtons (0),
+	m_nMouseX (0), m_nMouseY (0), m_nMouseWheel (0),
+	m_nMouseLastButtons (0),
+	m_nMouseLastX (0), m_nMouseLastY (0), m_nMouseLastWheel (0),
 	m_pSound (0),
 	m_nScaleY (1),
 	m_nOutWidth (0), m_nOutHeight (0),
@@ -866,6 +874,28 @@ void CKernel::ApplyRequests (void)
 		}
 		oric_machine_loci_kbd_report (m_ucHIDModifiers, Keys);
 	}
+	ApplyMouse ();
+}
+
+// Cœur 1, début de trame : déplacements de la souris depuis la trame
+// précédente, transmis à LOCI (sans effet tant que le 6502 n'a pas donné
+// l'adresse du rapport en XRAM)
+void CKernel::ApplyMouse (void)
+{
+	unsigned nButtons = m_nMouseButtons;
+	int nX = m_nMouseX, nY = m_nMouseY, nWheel = m_nMouseWheel;
+	if (   nButtons == m_nMouseLastButtons && nX == m_nMouseLastX
+	    && nY == m_nMouseLastY && nWheel == m_nMouseLastWheel)
+	{
+		return;
+	}
+	oric_machine_loci_mou_report ((unsigned char) (nButtons & 7),
+				      nX - m_nMouseLastX, nY - m_nMouseLastY,
+				      nWheel - m_nMouseLastWheel);
+	m_nMouseLastButtons = nButtons;
+	m_nMouseLastX = nX;
+	m_nMouseLastY = nY;
+	m_nMouseLastWheel = nWheel;
 }
 
 // Cœur 1 : une trame (image + son) à chaque demande du cœur 0.
@@ -967,12 +997,43 @@ void CKernel::UpdateKeyboard (void)
 			mLogger.Write (FromOric, LogNotice, "Clavier USB connecte");
 		}
 	}
+
+	if (bUpdated && m_pMouse == 0)
+	{
+		m_pMouse = (CMouseDevice *) mDeviceNameService.GetDevice ("mouse1", FALSE);
+		if (m_pMouse != 0)
+		{
+			m_pMouse->RegisterRemovedHandler (MouseRemovedHandler);
+			m_pMouse->RegisterStatusHandler (MouseStatusHandler);
+			mLogger.Write (FromOric, LogNotice, "Souris USB connectee (%u boutons%s)",
+				       m_pMouse->GetButtonCount (),
+				       m_pMouse->HasWheel () ? ", molette" : "");
+		}
+	}
 }
 
 void CKernel::KeyboardRemovedHandler (CDevice *pDevice, void *pContext)
 {
 	s_pThis->m_pKeyboard = 0;
 	oric_machine_keyboard_release_all ();
+}
+
+// Interruption USB (cœur 0) : boutons et déplacements cumulés
+void CKernel::MouseStatusHandler (unsigned nButtons, int nDisplacementX,
+				  int nDisplacementY, int nWheelMove)
+{
+	CKernel *k = s_pThis;
+	k->m_nMouseX = k->m_nMouseX + nDisplacementX;
+	k->m_nMouseY = k->m_nMouseY + nDisplacementY;
+	k->m_nMouseWheel = k->m_nMouseWheel + nWheelMove;
+	k->m_nMouseButtons = nButtons;
+}
+
+void CKernel::MouseRemovedHandler (CDevice *pDevice, void *pContext)
+{
+	s_pThis->m_pMouse = 0;
+	s_pThis->m_nMouseButtons = 0;		// boutons relâchés
+	CLogger::Get ()->Write (FromOric, LogNotice, "Souris USB retiree");
 }
 
 // ── Clavier ──────────────────────────────────────────────────────────────

@@ -632,6 +632,15 @@ void oric_machine_loci_kbd_report(uint8_t modifiers, const uint8_t keys[6]) {
         loci_kbd_set_report(&s_emu.loci, modifiers, keys);
 }
 
+/* main.c sdl_mouse_event : souris transmise à LOCI. Les compteurs de LOCI
+ * sont des octets cumulés : ajouter l'octet de poids faible d'un grand
+ * déplacement revient au même que plusieurs petits. */
+void oric_machine_loci_mou_report(uint8_t buttons, int dx, int dy, int wheel) {
+    if (s_emu.card_on[CARD_IDX_loci])
+        loci_mou_report(&s_emu.loci, buttons, (int8_t)(uint8_t)dx,
+                        (int8_t)(uint8_t)dy, (int8_t)(uint8_t)wheel, 0);
+}
+
 /* ── main.c : run_frame_instructions ───────────────────────────────────── */
 void oric_machine_run_frame(void) {
     emulator_t* emu = &s_emu;
