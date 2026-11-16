@@ -403,10 +403,18 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    seconde), fichier relu à son retour ; `UpdateKeyboard`
    (`UpdatePlugAndPlay`) seulement entre deux trames (le retrait libère le
    périphérique que le cœur 1 lirait) ; `__wrap_statvfs` (taille des
-   volumes FatFs pour le menu, celui de circle-newlib rend -1). Risque à
-   surveiller : clé arrachée pendant un transfert du cœur 1.
-9. Idées, par intérêt : Ethernet de la 3B+ pour le réseau (plus stable que
-   le Wi-Fi) ; manette USB → joystick IJK (déjà émulé par Phosphoric,
+   volumes FatFs pour le menu, celui de circle-newlib rend -1). Clé arrachée
+   pendant une copie (cœur 1 en plein transfert), vérifié : « umsd: CBW
+   transfer failed », erreur rendue, pas de blocage ; disquette de la clé
+   réécrite à son retour (2 puis 7 pistes).
+9. **Ethernet de la 3B+** (décidé le 16/11/2026, prochaine étape) : le
+   Wi-Fi se coupe et se reconnecte en ~7 s plusieurs fois par heure
+   (journal du 16/11 : 11:05, 11:20, 11:25, sans lien avec l'USB), rattrapé
+   par le rappel de REMOTE. Circle : `NetDeviceTypeEthernet` (LAN7515 de la
+   3B+, pilote `lan7800` de Circle) au lieu du WLAN ; à voir : choix par
+   option (`reseau=ethernet|wifi`), firmware Wi-Fi inutile alors, câble
+   débranché.
+10. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
    l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`
