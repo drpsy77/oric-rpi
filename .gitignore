@@ -26,3 +26,4 @@ phosphoric/
 # Phosphoric pour Windows et le web (bureau/construire.sh)
 bureau/build/
 bureau/roms/
+sauvegarde/
