@@ -44,6 +44,76 @@ fantôme de l'adresse, comme le vrai 6502 ; lire `$03AC` dépile : chaque
 `POKE 940,v` dépile puis empile, la pile n'avance pas. Les lectures de
 `RW0` par `PEEK` (`LDA (zp),Y`) sont justes.
 
+## Pour un programme : du compteur au curseur
+
+Les octets 1 à 3 ne sont pas une position mais des compteurs qui tournent
+(255 + 1 = 0, comme un compteur kilométrique). Une souris courante en
+donne environ 100 par centimètre (essai sur la 3B+ : 0 à 255 en 2 à
+3 cm). Le programme tient lui-même la position du curseur :
+
+1. **Au départ**, juste après `XREG` : lire les compteurs et les garder
+   comme « anciens » (ils ne valent pas forcément 0).
+2. **À chaque trame** (le mieux : dans l'interruption, pour ne jamais
+   laisser passer plus de 127 pas entre deux lectures, soit environ
+   60 cm/s) : `d = nouveau - ancien` sur 8 bits, pris signé ; puis
+   `ancien = nouveau`. Le passage de 255 à 0 se règle tout seul.
+3. **Sensibilité** : `s = reste + d` ; déplacement en points
+   `q = s >> n` (décalage *arithmétique*, signe gardé) ; `reste = s AND
+   (2^n - 1)`. Rien n'est perdu : les petits mouvements lents
+   s'additionnent. `n` est le réglage : 2 (division par 4) donne environ
+   10 cm pour traverser les 240 points du HIRES avec une souris à
+   100 pas/cm ; 1 ou 3 pour d'autres souris (réglage de CP/A).
+4. **Curseur** : `x = x + q` borné à 0..239, `y = y + q` borné à 0..199
+   (Y vers le bas : même sens que les lignes de l'écran).
+5. **Boutons** (octet 0) : un clic est le passage de 0 à 1 d'un bit entre
+   deux lectures ; le relâchement, de 1 à 0 (tracé à main levée tant que
+   le bit est à 1).
+6. **Molette** (octet 3) : même différence que l'étape 2, sans division
+   (un cran = 1).
+
+Lecture dans l'interruption : prendre la fenêtre 1 (`ADDR1` `$03AA`/`$03AB`,
+`STEP1` `$03A9`, `RW1` `$03A8`) et la laisser à la souris, pour ne pas
+déplacer la fenêtre 0 que le programme principal utiliserait au même moment.
+`XREG` se fait une seule fois, hors interruption.
+
+Étapes 2 et 3 pour X, avec `n = 2`, en 6502 (`ANCX` ancien compteur,
+`RESX` reste 0..3, `CURX` position) ; |d| doit rester sous 125 (`s` tient
+sur 8 bits signés) :
+
+```
+        LDA $03A8       ; compteur X (RW1, fenêtre sur l'octet 1)
+        TAY
+        SEC
+        SBC ANCX        ; A = d, signé
+        STY ANCX
+        CLC
+        ADC RESX        ; s = d + reste
+        TAX
+        AND #3
+        STA RESX        ; nouveau reste (0..3)
+        TXA
+        CMP #$80        ; décalage arithmétique : C = bit de signe
+        ROR A
+        CMP #$80
+        ROR A           ; A = q, signé (une paire CMP/ROR par bit de n)
+        BMI MOINS
+        CLC
+        ADC CURX
+        BCS MAXI        ; dépasse 255
+        CMP #240
+        BCC RANGE
+MAXI    LDA #239
+        BNE RANGE
+MOINS   CLC
+        ADC CURX        ; ajouter un négatif : C = 1 si pas sous 0
+        BCS RANGE
+        LDA #0
+RANGE   STA CURX
+```
+
+Exemples : `d = -1`, reste 0 : `s = $FF`, reste 3, `q = -1` (−1 = −4 + 3) ;
+`d = 5`, reste 0 : reste 1, `q = 1`.
+
 ## Programme d'essai (BASIC, Atmos)
 
 Vérifié sur le banc natif (copie de Phosphoric, souris simulée par une
