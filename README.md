@@ -125,6 +125,17 @@ mettre à jour la disquette de démarrage, démarrer sur une autre
 (`locidisk=`) ou sans disquette. Chaque transfert est noté dans le journal.
 Pas de mot de passe dans TFTP : n'activer que sur un réseau de confiance.
 
+Page web de la carte : `web=80` (ou un autre port ; `web=1` vaut 80), avec
+`tftp=`, dont elle reprend le seul ordinateur autorisé, puis
+`http://oric.local/` dans le navigateur de cet ordinateur. Elle donne
+l'état de la machine (température, fréquence, temps par trame, adresse,
+heure, mémoire), la liste des dossiers (disquettes montées signalées), la
+lecture d'un fichier (texte affiché, le reste téléchargé), l'envoi de
+fichiers dans le dossier affiché (4 Mo en tout par envoi, au-delà TFTP) et
+un bouton Redémarrer (comme Ctrl+Alt+Suppr, après l'envoi d'un noyau).
+Mêmes protections que TFTP (remplacement par renommage, disquette montée
+lisible mais pas remplaçable) ; chaque demande est notée dans le journal.
+
 Heure : avec le réseau (modem ou TFTP), la Pi la prend par NTP dès que le Wi-Fi a son adresse
 (`ntp=pool.ntp.org`, nouvel essai toutes les 5 min sans réponse). Les
 fichiers écrits sur la carte (disquettes, journal) sont alors datés, et le

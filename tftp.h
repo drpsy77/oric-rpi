@@ -15,6 +15,7 @@
 #include <circle/net/netsubsystem.h>
 #include <circle/net/ipaddress.h>
 #include <circle/types.h>
+#include "carte.h"
 
 class COricTFTP : public CTFTPDaemon
 {
@@ -41,15 +42,13 @@ public:
 
 private:
 	bool MakePath (const char *pFileName);
-	bool Commit (void);
 	void Release (void);
 
 private:
-	const char *m_pClientName;
-	CIPAddress m_Client;			// sa dernière adresse connue
+	CClientAutorise m_Client;
 	void (*m_pWaitIdle) (void);
 
-	char m_Path[MaxFilenameLen + 8];	// « SD:/ » + nom
+	char m_Path[CARTE_MAX_CHEMIN];		// « SD:/ » + nom
 	u8 *m_pData;				// fichier entier, en mémoire
 	unsigned m_nSize;			// octets reçus ou à envoyer
 	unsigned m_nAlloc;

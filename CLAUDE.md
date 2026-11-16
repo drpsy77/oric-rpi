@@ -109,6 +109,14 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   Client sur la RPI 400 : `tftp -m binary oric.local -c get chemin`, ou
   `curl --tftp-no-options -T f tftp://oric.local/chemin` (`-o f` pour lire).
   Chaque transfert dans le journal.
+- `web=80` (avec `tftp=`, même client ; `web=1` = 80) : page web de la
+  carte (`web.cpp`, `CHTTPDaemon`, une tâche du cœur 0 par connexion) :
+  `http://oric.local/?d=oric/usb` liste (disquettes montées signalées),
+  `/f/chemin` lecture, `POST /envoi?d=` envoi multipart (4 Mo en tout :
+  CHTTPDaemon garde la requête et la réponse entières en mémoire, tampon de
+  4 Mo réservé par connexion), état de la machine, `POST /redemarrer`
+  (Ctrl+Alt+Suppr 1,5 s plus tard). Code de la carte commun avec TFTP :
+  `carte.cpp` (client autorisé, `CarteEcrire` par renommage).
 - `nom=oric` : mDNS du port (`mdns.cpp`, tâche du cœur 0, avec le réseau) :
   la Pi répond à `oric.local` ; les noms en `.local` (`tftp=`, `getaddrinfo`
   du modem dans `netrelay.cpp`, donc ATDT et `HOSTS` de CP/A) sont cherchés
@@ -152,6 +160,9 @@ mesure ajoutée par appui),
 | `journal.cpp/.h` | journal en mémoire (verrou entre cœurs), écrit par le cœur 0 |
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `tftp.cpp/.h` | serveur TFTP de la carte SD (`tftp=`), tâche du cœur 0 |
+| `web.cpp/.h` | page web de la carte (`web=`) : liste, lecture, envoi, état, redémarrage |
+| `cles.cpp/.h` | clés USB de la Pi (umsd1/2 → `USB:`, `USB2:`) : branchement et retrait à chaud, journal (étape 1, pas encore servies à LOCI) |
+| `carte.cpp/.h` | accès réseau à la carte, commun à TFTP et web (client, renommage, disquettes montées) |
 | `mdns.cpp/.h` | mDNS : `nom.local` de la Pi, noms en `.local` des autres machines |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
 | `main.cpp` | copie circle-stdlib |
@@ -351,16 +362,26 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    `sauvegarde_disquettes.py` aujourd'hui avec la carte en main). La
    disquette de démarrage étant montée, la remplacer demande de démarrer sur
    une autre ou sans disquette.
-7. Liste de la carte à distance : TFTP n'a pas de commande de liste.
-   Proposé : un nom réservé (ex. `oric/usb/.liste`) qui rend le contenu du
-   dossier (une vingtaine de lignes dans `tftp.cpp`) ; plus tard, une page
-   web de gestion (`CHTTPDaemon` de Circle : liste, téléchargement, envoi,
-   effacement, mêmes protections). Un serveur FTP (FileZilla) est écarté :
-   trop lourd pour le gain.
-8. Idées, par intérêt : Ethernet de la 3B+ pour le réseau (plus stable que
+7. Liste de la carte à distance : **page web** (`web=`, 16/11/2026), à
+   essayer sur la 3B+ : liste, lecture, envoi, état, redémarrage, client
+   de `tftp=` seul. Pas encore : effacement, renommage, dossiers. Un serveur
+   FTP (FileZilla) est écarté : trop lourd pour le gain.
+8. **Clés USB réelles pour LOCI** (décidé le 16/11/2026) : deux clés au
+   plus, branchées et retirées à chaud sans prévenir, comme sur le vrai
+   LOCI. Option `clesusb=apres` (défaut : après `oric/usb`) ou `remplace`
+   (la 1ʳᵉ clé prend le numéro d'`oric/usb`). Places réservées dans LOCI au
+   démarrage (Phosphoric ne retire pas un périphérique), « absente » sans
+   clé (erreur sous CP/A). Disquette montée depuis une clé : gardée en
+   mémoire, CP/A continue clé retirée ; écritures reportées au retour de la
+   même clé (numéro de série du volume), jamais sur une autre. FAT16/32
+   seulement (`FF_FS_EXFAT 0` dans Circle). Étape 1 faite (`cles.cpp`,
+   journal seul) ; étape 2 : service à LOCI. Alors `UpdatePlugAndPlay`
+   seulement entre deux trames (le retrait libère le périphérique que le
+   cœur 1 pourrait lire). Clé retirée puis remise : FatFs remonte seul le
+   volume au premier accès (`disk_status` → `STA_NOINIT`).
+9. Idées, par intérêt : Ethernet de la 3B+ pour le réseau (plus stable que
    le Wi-Fi) ; manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
    l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`
-   déjà lié) ; LED d'activité pendant la réécriture des disquettes ; vraie
-   clé USB comme « 1: ».
+   déjà lié) ; LED d'activité pendant la réécriture des disquettes.

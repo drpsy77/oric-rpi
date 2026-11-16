@@ -90,3 +90,7 @@ la fenêtre TCP retient l'émetteur.
 6. mDNS (`mdns.cpp`) : la Pi répond à `oric.local` (`nom=`) ; les noms en
    `.local` (tftp=, ATDT, `HOSTS`) sont cherchés en multicast, le DNS de la
    box ne les connaissant pas.
+7. Page web de la carte (`web=<port>`, avec `tftp=`, `web.cpp`) : tâche
+   du cœur 0 par connexion (`CHTTPDaemon` de Circle), même client et mêmes
+   protections que TFTP (`carte.cpp`, commun aux deux) : liste, lecture,
+   envoi (4 Mo au plus par envoi), état de la machine, redémarrage.

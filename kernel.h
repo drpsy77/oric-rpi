@@ -68,7 +68,9 @@ private:
 
 	// Réglages : oric.cfg (dossier de lociflash=) d'abord, puis cmdline.txt
 	void ReadSettings (void);
-	static void WaitEmulationIdle (void);	// tâche TFTP (cœur 0)
+	static void WaitEmulationIdle (void);	// tâches TFTP et web (cœur 0)
+	static void WebStatus (class CString *pHTML);	// page web : état
+	static void WebReboot (void);			// page web : redémarrage
 	const char *Option (const char *pName, const char *pDefault = 0);
 	unsigned OptionDecimal (const char *pName, unsigned nDefault);
 
@@ -91,6 +93,7 @@ private:
 	bool m_bNetStarting;
 	class COricTFTP *m_pTFTP;
 	class COricMDNS *m_pMDNS;			// nom.local, noms en .local
+	class COricWeb *m_pWeb;				// page web de la carte (web=)
 
 	// Heure : NTP dès que le Wi-Fi est prêt (ntp=), fuseau de fuseau= appliqué
 	// à l'horloge de Circle (dates des fichiers de la carte SD)
@@ -112,6 +115,8 @@ private:
 	volatile bool m_bPerfRequest;			// celle-ci par le cœur 0
 	volatile bool m_bRebootRequest;			// Ctrl+Alt+Suppr, cœur 0 aussi
 	volatile bool m_bHaltRequest;			// Ctrl+Alt+Fin, cœur 0 aussi
+	volatile bool m_bWebReboot;			// bouton de la page web (cœur 0)
+	unsigned m_nWebRebootAt;			// ... à cet instant (GetClockTicks)
 
 	// LOCI : bouton Action (F8) et rapport clavier HID
 	volatile bool m_bLociDown;

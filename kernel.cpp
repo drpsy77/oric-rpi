@@ -42,6 +42,9 @@
 //   tftp=cyberlab.local           serveur TFTP de la carte SD (port 69), pour
 //                                 ce client seulement (nom ou adresse) ;
 //                                 démarre le Wi-Fi même sans modem (tftp.cpp)
+//   web=80                        avec tftp= : page web de la carte SD sur ce
+//                                 port (liste, lecture, envoi, état,
+//                                 redémarrage), même client seulement (web.cpp)
 //   nom=oric                      avec le réseau : nom de la Pi (oric.local,
 //                                 mDNS) ; les noms en .local des autres
 //                                 machines sont aussi trouvés (mdns.cpp)
@@ -61,6 +64,8 @@
 #include "netrelay.h"
 #include "tftp.h"
 #include "mdns.h"
+#include "web.h"
+#include "cles.h"
 
 #include <circle/machineinfo.h>
 #include <circle/memory.h>
@@ -112,6 +117,7 @@ CKernel::CKernel (void)
 	m_bNetStarting (false),
 	m_pTFTP (0),
 	m_pMDNS (0),
+	m_pWeb (0),
 	m_pNTPDaemon (0),
 	m_nClockCheck (0),
 	m_bClockSet (false),
@@ -125,6 +131,8 @@ CKernel::CKernel (void)
 	m_bPerfRequest (false),
 	m_bRebootRequest (false),
 	m_bHaltRequest (false),
+	m_bWebReboot (false),
+	m_nWebRebootAt (0),
 	m_bLociDown (false),
 	m_bLociUp (false),
 	m_bHIDChanged (false),
@@ -330,6 +338,102 @@ void CKernel::UpdateNetwork (void)
 		m_pTFTP = new COricTFTP (&mNet, Option ("tftp"), WaitEmulationIdle);
 		JournalPrintf ("TFTP : actif, client autorise %s\n", Option ("tftp"));
 	}
+
+	// Page web de la carte : même client que TFTP, une tâche par connexion
+	unsigned nWeb = OptionDecimal ("web", 0);
+	if (nWeb == 1)
+	{
+		nWeb = 80;			// web=1 : port habituel
+	}
+	if (nWeb != 0 && nWeb < 65536)
+	{
+		if (!m_bTFTP)
+		{
+			JournalPrintf ("Web : web= demande tftp= (client autorise), serveur non demarre\n");
+		}
+		else
+		{
+			static const TWebHooks Hooks = { WaitEmulationIdle, WebStatus, WebReboot };
+			m_pWeb = new COricWeb (&mNet, (u16) nWeb, Option ("tftp"), &Hooks);
+			JournalPrintf ("Web : actif, http://%s.local%s%s/ , client autorise %s\n",
+				       Option ("nom", "oric"), nWeb != 80 ? ":" : "",
+				       nWeb != 80 ? Option ("web") : "", Option ("tftp"));
+		}
+	}
+}
+
+// Page web : redémarrage demandé (bouton). Laissé au cœur 0 dans 1,5 s,
+// le temps que la page de réponse parte.
+void CKernel::WebReboot (void)
+{
+	s_pThis->m_nWebRebootAt = CTimer::GetClockTicks () + 1500000;
+	s_pThis->m_bWebReboot = true;
+}
+
+// Page web : état de la machine, en lignes de tableau HTML
+void CKernel::WebStatus (CString *pHTML)
+{
+	CKernel *k = s_pThis;
+	CString Ligne;
+
+	pHTML->Append ("<tr><th>Phosphoric</th><td>");
+	pHTML->Append (oric_machine_version ());
+	pHTML->Append ("</td></tr>");
+
+	unsigned nUptime = CTimer::Get ()->GetUptime ();
+	Ligne.Format ("<tr><th>En marche depuis</th><td>%u j %02u h %02u min</td></tr>",
+		      nUptime / 86400, nUptime / 3600 % 24, nUptime / 60 % 60);
+	pHTML->Append (Ligne);
+
+	if (k->m_bClockSet)
+	{
+		time_t nLocal = CTimer::Get ()->GetLocalTime ();	// heure locale
+		struct tm Tm;
+		if (gmtime_r (&nLocal, &Tm) != 0)
+		{
+			Ligne.Format ("<tr><th>Heure</th><td>%02d/%02d/%04d %02d:%02d:%02d</td></tr>",
+				      Tm.tm_mday, Tm.tm_mon + 1, Tm.tm_year + 1900,
+				      Tm.tm_hour, Tm.tm_min, Tm.tm_sec);
+			pHTML->Append (Ligne);
+		}
+	}
+
+	CString IP;
+	k->mNet.GetConfig ()->GetIPAddress ()->Format (&IP);
+	Ligne.Format ("<tr><th>Réseau</th><td>%s.local, %s%s</td></tr>",
+		      k->Option ("nom", "oric"), (const char *) IP,
+		      k->m_bModem ? ", modem de LOCI" : "");
+	pHTML->Append (Ligne);
+
+	Ligne.Format ("<tr><th>Processeur</th><td>%u MHz (maximum %u), %u °C</td></tr>",
+		      CMachineInfo::Get ()->GetClockRate (CLOCK_ID_ARM) / 1000000,
+		      k->m_CPUThrottle.GetMaxClockRate () / 1000000,
+		      k->m_CPUThrottle.GetTemperature ());
+	pHTML->Append (Ligne);
+
+	if (k->m_nWindows == 0)
+	{
+		pHTML->Append ("<tr><th>Trame</th><td>pas encore de mesure (10 s)</td></tr>");
+	}
+	else
+	{
+		Ligne.Format ("<tr><th>Trame (20 ms)</th><td>moyenne %u.%01u ms (%u %%), "
+			      "max %u.%01u ms, %u image(s) sautée(s) sur 10 s ; "
+			      "pire %u.%01u ms</td></tr>",
+			      k->m_nLastAvg / 1000, k->m_nLastAvg / 100 % 10,
+			      k->m_nLastAvg * 100 / FRAME_US,
+			      k->m_nLastMax / 1000, k->m_nLastMax / 100 % 10, k->m_nLastSkipped,
+			      k->m_nWorst / 1000, k->m_nWorst / 100 % 10);
+		pHTML->Append (Ligne);
+	}
+
+	Ligne.Format ("<tr><th>Son HDMI</th><td>%s</td></tr>",
+		      k->m_pSound != 0 ? "actif" : "inactif");
+	pHTML->Append (Ligne);
+
+	Ligne.Format ("<tr><th>Mémoire libre</th><td>%u Mo</td></tr>",
+		      (unsigned) (CMemorySystem::Get ()->GetHeapFreeSpace (HEAP_ANY) >> 20));
+	pHTML->Append (Ligne);
 }
 
 // Tâche TFTP (cœur 0) : attend que le cœur 1 ait fini sa trame. Il reste
@@ -542,6 +646,11 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			}
 		}
 
+		if (m_bWebReboot && (int) (CTimer::GetClockTicks () - m_nWebRebootAt) >= 0)
+		{
+			m_bWebReboot = false;
+			m_bRebootRequest = true;	// bouton de la page web
+		}
 		if (m_bRebootRequest || m_bHaltRequest)
 		{
 			// Ctrl+Alt+Suppr, Ctrl+Alt+Fin : le cœur 1 attend la trame
@@ -554,7 +663,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			}
 			oric_machine_shutdown ();
 			JournalPrintf (m_bHaltRequest ? "Arret (Ctrl+Alt+Fin)\n"
-						      : "Redemarrage (Ctrl+Alt+Suppr)\n");
+						      : "Redemarrage (Ctrl+Alt+Suppr ou page web)\n");
 			if (pJournal != 0)
 			{
 				fflush (pJournal);
@@ -726,10 +835,15 @@ void CKernel::StartSound (void)
 	}
 }
 
-// Repris de Circle sample/08-usbkeyboard (branchement à chaud du clavier)
+// Repris de Circle sample/08-usbkeyboard (branchement à chaud du clavier) ;
+// les clés USB suivent le même chemin (cles.cpp)
 void CKernel::UpdateKeyboard (void)
 {
 	boolean bUpdated = mUSBHCI.UpdatePlugAndPlay ();
+	if (bUpdated)
+	{
+		ClesUSBMiseAJour ();		// clés USB branchées ou retirées
+	}
 
 	if (bUpdated && m_pKeyboard == 0)
 	{
