@@ -179,6 +179,13 @@ LOCI), mêmes noms que dans `cmdline.txt`, qu'ils remplacent (sauf `width`,
 `height`, `lociflash`, `reseau`). Modèle complet (toutes les options, en commentaire,
 en ASCII pour CP/A) dans `sdcard/`.
 
+Température : sans ventilateur, la 3B+ atteint 60 °C ; Circle passe alors
+le processeur à 600 MHz et l'Oric ralentit (son haché). `socmaxtemp=70`
+dans `cmdline.txt` et `temp_soft_limit=70` dans `config.txt` (modèles
+`sdcard/`) repoussent ce seuil. F12 ajoute une mesure à `oric/perf.txt` ;
+une trame en retard de plus de 10 ms est notée dans le journal, avec la
+fréquence et la température.
+
 Mode de l'écran (50 ou 60 Hz, 720p, 1080p, 576p) : blocs à choisir dans
 `config.txt` (lu par le firmware, donc pas dans `oric.cfg`), ainsi que
 `hdmi_pixel_encoding=2` (couleurs non délavées).

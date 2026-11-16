@@ -32,6 +32,11 @@ kernel=kernel8-32.img
 #hdmi_group=1
 #hdmi_mode=4
 
+# Température : au-delà de 60 °C (défaut de la 3B+), le firmware plafonne
+# le processeur à 1200 MHz. 70 = maximum permis. Circle a son propre seuil,
+# socmaxtemp= dans cmdline.txt (au-delà : 600 MHz, l'Oric ralentit).
+temp_soft_limit=70
+
 # Couleurs : RGB complet (0-255). En mode « CEA » (hdmi_group=1) le firmware
 # envoie sinon 16-235, que beaucoup d'écrans montrent délavé (noir gris,
 # couleurs pâles). Noirs bouchés ou blancs brûlés : commenter.

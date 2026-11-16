@@ -89,7 +89,7 @@ section `[...]` ; modèle `sdcard/`), `cmdline.txt` (une ligne), `oric/`.
 Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 
 `cmdline.txt` :
-- commun : `width=590 height=448 keymap=FR` (`clavier=oric/azerty.kma` :
+- commun : `width=590 height=448 keymap=FR socmaxtemp=70` (`clavier=oric/azerty.kma` :
   correspondance d'Oricutron, modèle `sdcard/`, remplace la table intégrée ;
   `pixels=tele` par défaut,
   `pixels=carres` ; `couleurs=tele|pures`, `saturation=`, `luminosite=` en %,
@@ -169,7 +169,10 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 
 Fichiers écrits par le noyau : `oric/journal.txt` (journal de Phosphoric,
 session précédente dans `journal-precedent.txt`), `oric/perf.txt` (F12, une
-mesure ajoutée par appui),
+mesure ajoutée par appui ; cœur 1 : durée des trames ; cœur 0 : retard
+des demandes de trame sur l'échéance de 20 ms et plus longue durée de
+chaque activité ; en plus, « Coeur 0 : trame en retard de N ms » dans le
+journal au-delà de 10 ms, avec l'activité la plus longue),
 `oric/loci/picowifi.cfg` (AT&W du modem).
 
 ## Fichiers du port
@@ -206,7 +209,14 @@ mesure ajoutée par appui),
   toucher aux constantes `FDC_TIMING_*` de `disk.h`.
 - **Fréquence** : `CCPUThrottle` à `CPUSpeedMaximum` (sinon le firmware de la
   3B+ redescend à 600 MHz après ~1 min), `Update()` dans la boucle du cœur 0 ;
-  ralentit au-delà de `socmaxtemp` (60 °C par défaut).
+  au-delà de `socmaxtemp` (60 °C par défaut), Circle passe **directement à
+  600 MHz** (contrôle toutes les 4 s, retour 3 °C plus bas) : trame 25 ms
+  (émulation 16, image 9) pour 20 ms de budget, Oric à ~77 % par à-coups
+  de 100 ms, son haché. Vu le 16/11/2026 sur la 3B+ (dissipateur sans
+  ventilateur, boîtier ouvert, 57-60 °C : les deux cœurs tournent en
+  boucle active). Réglé par `socmaxtemp=70` (`cmdline.txt`, Circle
+  accepte 40-78) et `temp_soft_limit=70` (`config.txt` : limite douce du
+  firmware, 1200 MHz au-delà ; 70 = maximum).
 - **Multicœur** : `CEmuCores` (`CMultiCoreSupport`) ; le cœur 0 demande une
   trame toutes les 20 ms du timer, le cœur 1 la calcule. La file du son ne
   fait que corriger la dérive (moyenne sur 1 s, ±200 µs par trame au plus) :
@@ -433,7 +443,16 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    prévu dans CP/A : faite, vérifiée sur le banc natif pour le protocole
    (programme BASIC de `docs/souris-loci.md`, souris simulée), à essayer
    sur la 3B+ avec une vraie souris.
-11. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
+11. **Cadence et chaleur** (avis de Pierre, 16/11/2026) : plutôt que de
+   faire dormir le cœur 1 entre les trames (`WFE`), répartir la charge sur
+   un cœur de plus (réseau, USB, carte SD hors du cœur de l'émulation) et
+   garantir à l'émulateur **seul** une cadence parfaite, avec une pause
+   maîtrisée comprise dans les 20 ms. Contrainte de Circle : interruptions
+   et ordonnanceur (réseau) sur le cœur 0 seulement. Mesures en place pour
+   en juger : F12 (`perf.txt`, cœur 0 et cœur 1) et « Coeur 0 : trame en
+   retard » dans le journal (durées émulation/son/image, MHz, °C, état du
+   firmware, rapports du clavier).
+12. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
    l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`

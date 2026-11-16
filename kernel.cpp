@@ -193,9 +193,19 @@ CKernel::CKernel (void)
 	m_nFramesDone (0),
 	m_nLastAvg (0), m_nLastMax (0), m_nLastSkipped (0),
 	m_nWorst (0), m_nWindows (0),
-	m_nPerfCount (0)
+	m_nPerfCount (0),
+	m_nLateMax (0), m_nLateLast (0), m_nLateWorst (0),
+	m_nLateCount (0), m_nLateCountLast (0),
+	m_nLateLogged (0), m_nRecal (0),
+	m_nCore0WindowStart (0), m_nCore0Windows (0),
+	m_nLastEmu (0), m_nLastAudio (0), m_nLastBlit (0),
+	m_nKeyReports (0), m_nKeyReportsLogged (0), m_nKeyReportsTicks (0)
 {
 	s_pThis = this;
+	memset (m_nAct0Max, 0, sizeof m_nAct0Max);
+	memset (m_nAct0Last, 0, sizeof m_nAct0Last);
+	memset (m_nAct0Worst, 0, sizeof m_nAct0Worst);
+	memset (m_nAct0Request, 0, sizeof m_nAct0Request);
 	mActLED.Blink (5);	// show we are alive
 }
 
@@ -710,13 +720,19 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	unsigned nLevelSum = 0, nLevelCount = 0;
 	int nCorrection = 0;			// µs ajoutées à chaque trame
 
+	m_nCore0WindowStart = CTimer::GetClockTicks ();
 	while (true)
 	{
+		unsigned nT = CTimer::GetClockTicks ();
 		mScheduler.Yield ();		// pile réseau, Wi-Fi ou Ethernet
+		nT = Core0Time (Act0Taches, nT);
 		NetRelayService ();		// sockets et fermetures demandés par le cœur 1
+		nT = Core0Time (Act0Relais, nT);
 		UpdateNetwork ();
 		UpdateClock ();
 		m_CPUThrottle.Update ();	// surveille la température (toutes les 2 à 5 s)
+		nT = Core0Time (Act0Divers, nT);
+		Core0Window (nT);
 
 		if (m_nFramesDone != m_nFramesRequested)
 		{
@@ -727,7 +743,9 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// Trame faite : le cœur 1 attend, on peut toucher au son et aux fichiers
 		// Branchements USB (clavier, clés) seulement ici : le retrait d'une clé
 		// libère le périphérique que le cœur 1 lit pendant sa trame (LOCI)
+		nT = CTimer::GetClockTicks ();
 		UpdateKeyboard ();
+		nT = Core0Time (Act0USB, nT);
 		if (nWritten != m_nFramesDone)
 		{
 			nWritten = m_nFramesDone;
@@ -735,6 +753,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			{
 				int nBytes = s_nSamplesFrame * 2 * sizeof (int16_t);
 				nShortWrites = m_pSound->Write (s_SoundBuf, nBytes) < nBytes ? nShortWrites + 1 : 0;
+				Core0Time (Act0Son, nT);
 				if (nShortWrites > 10)
 				{
 					// le son ne se vide plus (pas de récepteur HDMI audio ?)
@@ -807,9 +826,10 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		}
 		if (CTimer::GetClockTicks () - nLastFlush > 2000000)	// toutes les 2 s
 		{
+			nT = CTimer::GetClockTicks ();
 			LogToJournal ();
 			JournalFlush ();
-			nLastFlush = CTimer::GetClockTicks ();
+			nLastFlush = Core0Time (Act0Journal, nT);
 		}
 
 		if (!bPrimed)
@@ -823,14 +843,17 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		}
 		else
 		{
-			if ((int) (CTimer::GetClockTicks () - nDeadline) < 0)
+			unsigned nNow = CTimer::GetClockTicks ();
+			if ((int) (nNow - nDeadline) < 0)
 			{
 				continue;
 			}
+			Core0Late (nNow - nDeadline);
 			nDeadline += FRAME_US + nCorrection;
 			if ((int) (CTimer::GetClockTicks () - nDeadline) > 5 * FRAME_US)
 			{
 				nDeadline = CTimer::GetClockTicks ();	// trop en retard : on recale
+				m_nRecal++;
 			}
 		}
 
@@ -923,13 +946,18 @@ void CKernel::RunEmulation (void)
 		// Émulation d'une trame + son correspondant
 		unsigned nStart = CTimer::GetClockTicks ();
 		oric_machine_run_frame ();
+		unsigned nAudio = CTimer::GetClockTicks ();
 		oric_machine_audio (s_SoundBuf, s_nSamplesFrame);
-		unsigned nEmu = CTimer::GetClockTicks () - nStart;
+		unsigned nEnd = CTimer::GetClockTicks ();
+		unsigned nEmu = nEnd - nStart;
+		m_nLastEmu = nEmu;
+		m_nLastAudio = nEnd - nAudio;
 
 		// Affichage, sauté si la trame précédente a dépassé son budget
 		if (!bSkipBlit)
 		{
 			Blit ();
+			m_nLastBlit = CTimer::GetClockTicks () - nEnd;
 		}
 		else
 		{
@@ -1201,6 +1229,7 @@ void CKernel::SetupKeyMap (void)
 void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
 	// Rapport brut transmis tel quel à LOCI (appliqué dans la boucle principale)
+	s_pThis->m_nKeyReports = s_pThis->m_nKeyReports + 1;
 	s_pThis->m_ucHIDModifiers = ucModifiers;
 	for (unsigned i = 0; i < 6; i++)
 	{
@@ -1301,6 +1330,116 @@ void CKernel::KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned cha
 // autre ordinateur : chaque appui donne une mesure numérotée, avec le temps
 // écoulé depuis le démarrage. L'écriture sur la carte SD peut provoquer un
 // petit à-coup.
+// Cœur 0 : durée d'une activité commencée à nStart ; rend l'heure actuelle
+unsigned CKernel::Core0Time (unsigned nActivity, unsigned nStart)
+{
+	unsigned nNow = CTimer::GetClockTicks ();
+	unsigned nTime = nNow - nStart;
+	if (nTime > m_nAct0Max[nActivity])
+	{
+		m_nAct0Max[nActivity] = nTime;
+	}
+	if (nTime > m_nAct0Request[nActivity])
+	{
+		m_nAct0Request[nActivity] = nTime;
+	}
+	return nNow;
+}
+
+// Cœur 0 : une trame demandée nLate µs après son échéance. Au-delà de 10 ms,
+// une ligne dans le journal avec l'activité la plus longue depuis la demande
+// précédente (au plus 1000 lignes, le journal écrit lui-même sur la carte)
+void CKernel::Core0Late (unsigned nLate)
+{
+	if (nLate > m_nLateMax)
+	{
+		m_nLateMax = nLate;
+	}
+	if (nLate > 5000)
+	{
+		m_nLateCount++;
+	}
+	if (nLate > 10000 && m_nLateLogged < 1000)
+	{
+		static const char *Names[Act0Nb] =
+			{ "taches", "relais", "divers", "USB", "son", "journal" };
+		unsigned nMax = 0;
+		for (unsigned i = 1; i < Act0Nb; i++)
+		{
+			if (m_nAct0Request[i] > m_nAct0Request[nMax])
+			{
+				nMax = i;
+			}
+		}
+		unsigned nUptime = CTimer::Get ()->GetUptime ();
+		// Fréquence et température : une fois par seconde au plus (appels
+		// au firmware) ; rapports du clavier USB par seconde depuis la
+		// ligne précédente
+		static unsigned s_nLastSecond = ~0U;
+		static unsigned s_nMHz, s_nTemp, s_nThrottled;
+		if (nUptime != s_nLastSecond)
+		{
+			s_nLastSecond = nUptime;
+			s_nMHz = CMachineInfo::Get ()->GetClockRate (CLOCK_ID_ARM) / 1000000;
+			s_nTemp = m_CPUThrottle.GetTemperature ();
+			// État du firmware : bit 0 sous-tension, 1 fréquence plafonnée,
+			// 2 ralenti, 3 limite de température douce (bits 16-19 : déjà
+			// arrivé depuis le démarrage)
+			CBcmPropertyTags Tags;
+			TPropertyTagSimple TagThrottled;
+			TagThrottled.nValue = 0;
+			s_nThrottled = Tags.GetTag (PROPTAG_GET_THROTTLED, &TagThrottled,
+						    sizeof TagThrottled, 4)
+				       ? TagThrottled.nValue : 0xFFFFFFFF;
+		}
+		unsigned nNow = CTimer::GetClockTicks ();
+		unsigned nReports = m_nKeyReports;
+		unsigned nElapsed = nNow - m_nKeyReportsTicks;
+		unsigned nPerSecond = nElapsed > 0
+			? (unsigned) ((u64) (nReports - m_nKeyReportsLogged) * 1000000 / nElapsed) : 0;
+		m_nKeyReportsLogged = nReports;
+		m_nKeyReportsTicks = nNow;
+		JournalPrintf ("Coeur 0 : trame en retard de %u ms a %u:%02u:%02u"
+			       " (plus long : %s %u ms ; coeur 1 : trame %u ms dont son %u,"
+			       " image %u ms ; %u MHz %u C etat %X ; clavier %u rapports/s)\n",
+			       nLate / 1000,
+			       nUptime / 3600, nUptime / 60 % 60, nUptime % 60,
+			       Names[nMax], m_nAct0Request[nMax] / 1000, m_nLastEmu / 1000,
+			       m_nLastAudio / 1000, m_nLastBlit / 1000,
+			       s_nMHz, s_nTemp, s_nThrottled, nPerSecond);
+		m_nLateLogged++;
+	}
+	memset (m_nAct0Request, 0, sizeof m_nAct0Request);
+}
+
+// Cœur 0 : fenêtres de 10 s, comme les mesures du cœur 1
+void CKernel::Core0Window (unsigned nNow)
+{
+	if (nNow - m_nCore0WindowStart < STATS_FRAMES * FRAME_US)
+	{
+		return;
+	}
+	m_nCore0WindowStart = nNow;
+	m_nCore0Windows++;
+	for (unsigned i = 0; i < Act0Nb; i++)
+	{
+		m_nAct0Last[i] = m_nAct0Max[i];
+		if (m_nAct0Max[i] > m_nAct0Worst[i])
+		{
+			m_nAct0Worst[i] = m_nAct0Max[i];
+		}
+		m_nAct0Max[i] = 0;
+	}
+	m_nLateLast = m_nLateMax;
+	if (m_nLateMax > m_nLateWorst)
+	{
+		m_nLateWorst = m_nLateMax;
+	}
+	m_nLateMax = 0;
+	m_nLateCountLast = m_nLateCount;
+	m_nLateCount = 0;
+}
+
 void CKernel::WritePerf (void)
 {
 	FILE *pFile = fopen ("oric/perf.txt", "a");
@@ -1332,7 +1471,24 @@ void CKernel::WritePerf (void)
 			 m_nWorst, m_nWindows);
 		fprintf (pFile, "charge moyenne        : %u %%\n", m_nLastAvg * 100 / FRAME_US);
 	}
-	fprintf (pFile, "son HDMI              : %s\n\n", m_pSound != 0 ? "actif" : "inactif");
+	fprintf (pFile, "son HDMI              : %s\n", m_pSound != 0 ? "actif" : "inactif");
+	if (m_nCore0Windows != 0)
+	{
+		// Cœur 0 : retard des demandes de trame, durées de ses activités
+		fprintf (pFile, "coeur 0, dernieres 10 s : retard max %u us, %u trames en retard (> 5 ms)\n",
+			 m_nLateLast, m_nLateCountLast);
+		fprintf (pFile, "coeur 0 depuis le demarrage : retard max %u us, %u recalages, %u lignes au journal (> 10 ms)\n",
+			 m_nLateWorst, m_nRecal, m_nLateLogged);
+		static const char *Names[Act0Nb] =
+			{ "taches (reseau...)", "relais reseau", "divers", "USB", "son", "journal" };
+		fprintf (pFile, "activites du coeur 0, plus longue duree (us) : 10 s / depuis le demarrage\n");
+		for (unsigned i = 0; i < Act0Nb; i++)
+		{
+			fprintf (pFile, "  %-20s : %6u / %6u\n", Names[i], m_nAct0Last[i],
+				 m_nAct0Worst[i] > m_nAct0Last[i] ? m_nAct0Worst[i] : m_nAct0Last[i]);
+		}
+	}
+	fprintf (pFile, "\n");
 	fclose (pFile);
 }
 

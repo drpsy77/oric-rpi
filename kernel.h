@@ -64,6 +64,9 @@ private:
 	void UpdateClock (void);
 	void Blit (void);
 	void WritePerf (void);
+	unsigned Core0Time (unsigned nActivity, unsigned nStart);
+	void Core0Late (unsigned nLate);
+	void Core0Window (unsigned nNow);
 	void LogToJournal (void);
 	void ShowHalted (void);
 	void SetupKeyMap (void);
@@ -156,6 +159,35 @@ private:
 	unsigned m_nLastAvg, m_nLastMax, m_nLastSkipped;	// dernière fenêtre de 10 s
 	unsigned m_nWorst, m_nWindows;				// depuis le démarrage
 	unsigned m_nPerfCount;					// numéro de la mesure écrite
+
+	// Cœur 0 (F12, journal) : retard des demandes de trame sur l'échéance de
+	// 20 ms, et plus longues durées de ses activités. Un retard est rattrapé
+	// par des trames demandées d'affilée : à-coups dans le rythme de l'Oric.
+	enum
+	{
+		Act0Taches,		// mScheduler.Yield : réseau, TFTP, web, PHY...
+		Act0Relais,		// NetRelayService
+		Act0Divers,		// UpdateNetwork, UpdateClock, CPUThrottle
+		Act0USB,		// UpdateKeyboard (UpdatePlugAndPlay, clés)
+		Act0Son,		// Write du son HDMI
+		Act0Journal,		// LogToJournal + JournalFlush (carte SD)
+		Act0Nb
+	};
+	unsigned m_nAct0Max[Act0Nb];		// fenêtre de 10 s en cours
+	unsigned m_nAct0Last[Act0Nb];		// fenêtre précédente
+	unsigned m_nAct0Worst[Act0Nb];		// depuis le démarrage
+	unsigned m_nAct0Request[Act0Nb];	// depuis la dernière demande de trame
+	unsigned m_nLateMax, m_nLateLast, m_nLateWorst;	// retard (µs)
+	unsigned m_nLateCount, m_nLateCountLast;	// trames en retard de > 5 ms
+	unsigned m_nLateLogged;				// lignes du journal (> 10 ms)
+	unsigned m_nRecal;				// recalages (> 5 trames)
+	unsigned m_nCore0WindowStart, m_nCore0Windows;
+	volatile unsigned m_nLastEmu;			// cœur 1 : durée de la dernière trame
+	volatile unsigned m_nLastAudio;			// ... dont le son (ay_generate)
+	volatile unsigned m_nLastBlit;			// cœur 1 : copie de l'image
+	volatile unsigned m_nKeyReports;		// rapports du clavier USB reçus
+	unsigned m_nKeyReportsLogged;			// ... à la ligne précédente
+	unsigned m_nKeyReportsTicks;			// ... et son heure
 
 	static CKernel *s_pThis;
 };
