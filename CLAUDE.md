@@ -217,6 +217,19 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   boucle active). Réglé par `socmaxtemp=70` (`cmdline.txt`, Circle
   accepte 40-78) et `temp_soft_limit=70` (`config.txt` : limite douce du
   firmware, 1200 MHz au-delà ; 70 = maximum).
+  **Conclusion thermique (16/11/2026)** : les 56-60 °C relevés avant
+  n'étaient que le plafond de Circle (la Pi, jamais éteinte, a dû
+  osciller entre 600 et 1400 MHz depuis le début). Sans plafond,
+  équilibre à **63-64 °C à 1400 MHz** (page web relevée chaque minute
+  pendant 25 min, Ethernet, boîtier posé sur une boîte en métal) : 6 °C
+  de marge. La carte chauffe par le dessous alors que le dissipateur
+  reste presque à l'ambiante : contact puce-dissipateur défaillant
+  (pâte ou tampon sec), chaleur évacuée par la carte (le LAN7515 voisin
+  chauffe aussi, plus actif en Ethernet). À faire par Pierre : refaire
+  le contact (pâte ou tampon thermique) et changer de boîtier (aluminium
+  massif servant de radiateur, ou aéré avec ventilateur). Côté logiciel,
+  faire dormir les cœurs entre les trames réduirait la chaleur à la
+  source (point 11 des prochaines étapes) : n'est plus urgent.
 - **Multicœur** : `CEmuCores` (`CMultiCoreSupport`) ; le cœur 0 demande une
   trame toutes les 20 ms du timer, le cœur 1 la calcule. La file du son ne
   fait que corriger la dérive (moyenne sur 1 s, ±200 µs par trame au plus) :
