@@ -24,6 +24,8 @@ visé.
 # 1. circle-stdlib (une fois), pour Pi 3B+ / Zero 2 W, multicœur
 #    paquets : gcc-arm-none-eabi, libnewlib-arm-none-eabi, texinfo
 git clone --recursive https://github.com/smuehlst/circle-stdlib.git
+# exFAT des clés USB (FatFs de Circle), avant make :
+sh <ce dépôt>/preparer_circle.sh $PWD/circle-stdlib
 cd circle-stdlib && ./configure -r 3 -o ARM_ALLOW_MULTI_CORE && make
 (cd libs/circle/boot && make)                     # firmware du Pi
 (cd libs/circle/addon/wlan/firmware && make firmware)   # firmware Wi-Fi

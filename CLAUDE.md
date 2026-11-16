@@ -58,6 +58,12 @@ modifiés sur ces disquettes depuis l'installation précédente (référence :
 `sauvegarde/ancien/`, les images remplacées), remise ensuite en
 `oric/usb/sauve.dsk`.
 
+**Réglages du port dans circle-stdlib** : `sh preparer_circle.sh` (FatFs de
+Circle : `FF_FS_EXFAT 1` pour les clés USB en exFAT, `FF_USE_LABEL 1` ;
+seule modification de Circle, notée dans le script). À refaire sur un clone
+neuf, avant `make` ; si elle est faite après, `make clean && make` (les
+structures de FatFs sont dans circle-newlib), pas besoin de `mrproper`.
+
 **Après chaque `make` de circle-stdlib**, recompiler le pilote Wi-Fi avec
 les en-têtes de circle-newlib (voir Leçons) :
 
@@ -166,6 +172,7 @@ mesure ajoutée par appui),
 | `mdns.cpp/.h` | mDNS : `nom.local` de la Pi, noms en `.local` des autres machines |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
 | `main.cpp` | copie circle-stdlib |
+| `preparer_circle.sh` | réglages de FatFs dans circle-stdlib (exFAT, noms de volume) |
 | `installer_carte.sh`, `sauvegarde_disquettes.py` | installation sur la carte, sauvegarde des fichiers écrits sur l'Oric |
 | `Makefile`, `sdcard/`, `README.md`, `SOURCES.md`, `docs/` | |
 | `bureau/` | patchs du port reportés dans Phosphoric (versions Windows et web, `construire.sh`), prêts pour bmarty |
@@ -374,7 +381,8 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    clé (erreur sous CP/A). Disquette montée depuis une clé : gardée en
    mémoire, CP/A continue clé retirée ; écritures reportées au retour de la
    même clé (numéro de série du volume), jamais sur une autre. FAT16/32
-   seulement (`FF_FS_EXFAT 0` dans Circle). Étape 1 faite (`cles.cpp`,
+   et exFAT (`preparer_circle.sh` : la clé du vrai LOCI de Pierre est en
+   exFAT, format conseillé aujourd'hui). Étape 1 faite (`cles.cpp`,
    journal seul) ; étape 2 : service à LOCI. Alors `UpdatePlugAndPlay`
    seulement entre deux trames (le retrait libère le périphérique que le
    cœur 1 pourrait lire). Clé retirée puis remise : FatFs remonte seul le
