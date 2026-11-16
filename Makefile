@@ -50,5 +50,7 @@ LDFLAGS += $(foreach f,$(NETRELAY_WRAP),--wrap=$(f))
 
 # ACIA sans cadence, comme le vrai LOCI (oric_machine.c, __wrap_acia_write)
 LDFLAGS += --wrap=acia_write
+# Taille des volumes FatFs pour le menu de LOCI (cles.cpp, __wrap_statvfs)
+LDFLAGS += --wrap=statvfs
 
 -include $(DEPS)

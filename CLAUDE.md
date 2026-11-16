@@ -135,6 +135,10 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   applique le décalage à `CTimer` (il garde l'heure locale : `SetTimeZone`
   puis `SetTime` UTC), dont la FatFs date les fichiers ; « Heure : ... »
   dans le journal à chaque changement.
+- `clesusb=apres|remplace|non` (avec `loci=1`) : vraies clés USB de la Pi
+  (`cles.cpp`, deux, FAT ou exFAT) servies par LOCI après `oric/usb`, ou
+  la 1ʳᵉ à sa place ; branchement et retrait à chaud (voir point 8 des
+  prochaines étapes).
 - `locidisk=0:/cpa-en.dsk` (avec `loci=1`) : image en A: de LOCI, démarrage
   direct sans le menu ; F8 montre le menu avec A: rempli. Essayé sur le banc
   natif (CP/A démarre, `USBMOUNT` voit A:, `USBMOUNT C: x.DSK` depuis la clé
@@ -167,7 +171,7 @@ mesure ajoutée par appui),
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `tftp.cpp/.h` | serveur TFTP de la carte SD (`tftp=`), tâche du cœur 0 |
 | `web.cpp/.h` | page web de la carte (`web=`) : liste, lecture, envoi, état, redémarrage |
-| `cles.cpp/.h` | clés USB de la Pi (umsd1/2 → `USB:`, `USB2:`) : branchement et retrait à chaud, journal (étape 1, pas encore servies à LOCI) |
+| `cles.cpp/.h` | clés USB de la Pi (umsd1/2 → `USB:`, `USB2:`) servies par LOCI : branchement et retrait à chaud, `statvfs` des volumes |
 | `carte.cpp/.h` | accès réseau à la carte, commun à TFTP et web (client, renommage, disquettes montées) |
 | `mdns.cpp/.h` | mDNS : `nom.local` de la Pi, noms en `.local` des autres machines |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
@@ -382,11 +386,17 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    mémoire, CP/A continue clé retirée ; écritures reportées au retour de la
    même clé (numéro de série du volume), jamais sur une autre. FAT16/32
    et exFAT (`preparer_circle.sh` : la clé du vrai LOCI de Pierre est en
-   exFAT, format conseillé aujourd'hui). Étape 1 faite (`cles.cpp`,
-   journal seul) ; étape 2 : service à LOCI. Alors `UpdatePlugAndPlay`
-   seulement entre deux trames (le retrait libère le périphérique que le
-   cœur 1 pourrait lire). Clé retirée puis remise : FatFs remonte seul le
-   volume au premier accès (`disk_status` → `STA_NOINIT`).
+   exFAT, format conseillé aujourd'hui). Étape 1 (journal) vérifiée sur la
+   3B+. **Étape 2 faite (16/11/2026), à essayer** : places réservées par
+   `oric_machine_init` (racine « USB: », `loci_add_usb_storage`), texte
+   réécrit par `oric_machine_loci_key_status` (`[port]`, point 8 de
+   `docs/phosphoric-f8.md`) ; `disquette.c` : `associer` relève la clé
+   (`cles_usb_etat`), `cle_prete` attend la même clé (nouvel essai chaque
+   seconde), fichier relu à son retour ; `UpdateKeyboard`
+   (`UpdatePlugAndPlay`) seulement entre deux trames (le retrait libère le
+   périphérique que le cœur 1 lirait) ; `__wrap_statvfs` (taille des
+   volumes FatFs pour le menu, celui de circle-newlib rend -1). Risque à
+   surveiller : clé arrachée pendant un transfert du cœur 1.
 9. Idées, par intérêt : Ethernet de la 3B+ pour le réseau (plus stable que
    le Wi-Fi) ; manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,

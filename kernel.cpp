@@ -33,6 +33,10 @@
 //                                 wpa_supplicant.conf à la racine de la carte
 //   modemcadence=1                ACIA du modem cadencée sur son débit (9600
 //                                 bauds) ; défaut 0 : sans cadence, comme LOCI
+//   clesusb=apres|remplace|non    avec loci=1 : vraies clés USB de la Pi (deux,
+//                                 FAT ou exFAT) servies par LOCI après lociusb
+//                                 (défaut), ou la 1re à sa place ; branchement
+//                                 et retrait à chaud (cles.cpp)
 //   locidisk=0:/cpa-en.dsk        avec loci=1 : image montée en A: de LOCI et
 //                                 démarrage direct dessus (sans le menu)
 //   ntp=pool.ntp.org              avec modem=1 : serveur de l'heure (dates
@@ -547,6 +551,21 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	Media.loci_usb_dir   = Option ("lociusb", "oric/usb");
 	Media.loci_disk      = Option ("locidisk");	// ex. 0:/cpa.dsk : démarrage direct
 
+	// Vraies clés USB (cles.cpp) : celles déjà branchées sont montées avant
+	// LOCI (locidisk= peut viser une clé) ; places réservées dans LOCI
+	ClesUSBMiseAJour (false);
+	const char *pCles = Option ("clesusb", "apres");
+	bool bCles = Media.loci && strcmp (pCles, "non") != 0;
+	if (bCles && strcmp (pCles, "remplace") == 0)
+	{
+		Media.loci_usb_dir = 0;		// la 1re clé prend son numéro
+	}
+	for (unsigned i = 0; bCles && i < CLES_MAX && i < ORIC_MAX_KEYS; i++)
+	{
+		Media.loci_keys[i] = ClesUSBVolume (i);
+		Media.loci_key_status[i] = ClesUSBTexte (i);
+	}
+
 	// ROM système : rom= ; à défaut, le menu LOCI (si LOCI) ou le BASIC 1.1
 	static char LociMenuROM[128];
 	snprintf (LociMenuROM, sizeof LociMenuROM, "%s/locirom", Media.loci_flash_dir);
@@ -598,7 +617,6 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		NetRelayService ();		// sockets et fermetures demandés par le cœur 1
 		UpdateNetwork ();
 		UpdateClock ();
-		UpdateKeyboard ();
 		m_CPUThrottle.Update ();	// surveille la température (toutes les 2 à 5 s)
 
 		if (m_nFramesDone != m_nFramesRequested)
@@ -608,6 +626,9 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		DataMemBarrier ();
 
 		// Trame faite : le cœur 1 attend, on peut toucher au son et aux fichiers
+		// Branchements USB (clavier, clés) seulement ici : le retrait d'une clé
+		// libère le périphérique que le cœur 1 lit pendant sa trame (LOCI)
+		UpdateKeyboard ();
 		if (nWritten != m_nFramesDone)
 		{
 			nWritten = m_nFramesDone;
@@ -842,7 +863,7 @@ void CKernel::UpdateKeyboard (void)
 	boolean bUpdated = mUSBHCI.UpdatePlugAndPlay ();
 	if (bUpdated)
 	{
-		ClesUSBMiseAJour ();		// clés USB branchées ou retirées
+		ClesUSBMiseAJour (true);	// clés USB branchées ou retirées, LOCI informé
 	}
 
 	if (bUpdated && m_pKeyboard == 0)

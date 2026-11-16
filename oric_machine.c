@@ -347,6 +347,7 @@ static bool load_tape(emulator_t* emu, const char* tape_file) {
  * (débit 0), où la réception interroge le modem toutes les 32 cycles
  * (ACIA_RX_POLL_FLOOR). Signalé à bmarty (docs/phosphoric-f8.md). */
 static bool s_acia_free;
+static int s_key_number[ORIC_MAX_KEYS];  /* [port] numéro « N: » de chaque clé USB */
 
 static void acia_no_cadence(acia6551_t* acia) {
     acia->rx_reload = 1;
@@ -511,6 +512,24 @@ bool oric_machine_init(const oric_media_t* media) {
 
     /* main_setup_loci */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_LOCI) != 0) return false;
+    /* [port] Vraies clés USB de la Pi (cles.cpp), après --loci-usb : place
+     * réservée même sans clé (Phosphoric ne retire pas un périphérique de
+     * sa liste), servie par le volume FatFs de la clé (« USB: »). Sans clé,
+     * ses chemins échouent : erreur sous CP/A, comme sur le vrai LOCI. */
+    if (emu->card_on[CARD_IDX_loci]) {
+        for (int k = 0; k < ORIC_MAX_KEYS; k++) {
+            if (!media->loci_keys[k]) continue;
+            int n = loci_add_usb_storage(&emu->loci,
+                        media->loci_key_status[k] ? media->loci_key_status[k] : "",
+                        media->loci_keys[k]);
+            if (n > 0) {
+                s_key_number[k] = n;
+                log_info("LOCI: USB key %d -> %d: (%s)", k + 1, n, media->loci_keys[k]);
+            } else {
+                log_warning("LOCI: device table full, USB key %d not served", k + 1);
+            }
+        }
+    }
 
     /* main_setup_rom_model */
     if (!media->rom_file || !memory_load_rom(&emu->memory, media->rom_file, 0)) {
@@ -569,6 +588,19 @@ bool oric_machine_disk_mounted(const char* path) {
 
 void oric_machine_flush_disks(void) {
     disquette_flush(&s_emu);
+}
+
+/* [port] Texte d'une clé dans la liste des périphériques de LOCI
+ * (op_readdir_dev, « N: status » comme loci_add_usb_device). Appelé
+ * entre deux trames : le cœur 1 ne lit pas la liste en même temps. */
+void oric_machine_loci_key_status(int key, const char* status) {
+    if (key < 0 || key >= ORIC_MAX_KEYS || s_key_number[key] == 0) return;
+    int n = s_key_number[key];
+    snprintf(s_emu.loci.usb_dev[n - 1], LOCI_DIR_NAME_LEN, "%d: %s", n, status);
+}
+
+int oric_machine_loci_key_number(int key) {
+    return key >= 0 && key < ORIC_MAX_KEYS ? s_key_number[key] : 0;
 }
 
 /* main.c sdl_function_key : F5 = cpu_reset, Maj+F5 = cpu_nmi */

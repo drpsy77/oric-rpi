@@ -174,3 +174,22 @@ ligne 0 déjà balayées (comme `emu_clock_resume`). Fait et testé dans le patc
 Contournement dans le port : `oric_machine_run_frame` reporte le débordement
 après `emu_clock_frame_begin`.
 
+## 8. Pas de retrait d'une clé USB de LOCI
+
+`loci_add_usb_storage` (`src/io/loci_core.c`) ajoute une clé à la liste des
+périphériques, mais rien ne l'en retire ni ne change son texte : une clé
+retirée de l'hôte reste affichée, et une clé branchée plus tard ne peut
+qu'être ajoutée à la suite (4 places en tout, `LOCI_USB_DEV_MAX`). Sur le
+vrai LOCI, la liste suit les branchements.
+
+Proposition : une fonction qui change le texte d'une place
+(`loci_set_usb_status(loci, n, status)`), et une qui la vide (racine
+effacée, chemins « N: » en erreur), sans renuméroter les suivantes.
+
+Contournement dans le port : une place réservée par clé au démarrage
+(`oric_machine_init`, racine « USB: »), dont `oric_machine_loci_key_status`
+réécrit directement le texte (`usb_dev[n]`) au branchement et au retrait.
+Les disquettes montées depuis une clé restent en mémoire (comme toutes les
+disquettes de Phosphoric) ; `disquette.c` ne réécrit leurs pistes que sur la
+même clé (numéro de série du volume).
+

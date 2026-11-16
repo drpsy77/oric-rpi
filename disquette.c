@@ -19,9 +19,19 @@
  * (6400 octets en MFM_DISK, secteurs réencodés et CRC recalculés ; 4352 en
  * format brut). Une coupure pendant l'écriture n'abîme qu'une piste.
  *
+ * Disquette montée depuis une vraie clé USB (« USB:/... », cles.cpp) : la
+ * clé peut être retirée à tout moment, sans prévenir. L'image restant en
+ * mémoire, l'Oric continue de la lire et d'y écrire ; les pistes changées
+ * attendent le retour de la clé (nouvel essai toutes les DISQUETTE_ATTENTE
+ * trames) et ne sont réécrites que sur la même clé (numéro de série du
+ * volume, relevé quand la disquette est vue pour la première fois). Clé
+ * remise : le fichier est relu avant la comparaison (il a pu changer
+ * ailleurs ; l'image de l'Oric l'emporte sur les pistes qui diffèrent).
+ *
  * Appelé sur le cœur 1 entre deux trames, comme les accès de LOCI à la carte.
  */
 #include "disquette.h"
+#include "cles.h"
 #include "storage/sedoric.h"
 #include "utils/logging.h"
 
@@ -32,6 +42,7 @@
 
 #define DISQUETTE_DELAI_TRAMES  100     /* 2 s sans écriture */
 #define NB_LECTEURS             4
+#define DISQUETTE_ATTENTE       50      /* clé absente : nouvel essai toutes les 1 s */
 
 /* État du fichier d'une disquette montée */
 typedef struct {
@@ -39,11 +50,18 @@ typedef struct {
     char            path[256];
     sedoric_disk_t* fichier;    /* contenu du fichier ; NULL : à relire */
     bool            refus;      /* géométrie différente : fichier non touché */
+    /* Disquette d'une clé USB (cles_usb_etat) */
+    bool            cle;        /* chemin sur une clé */
+    bool            serie_lue;  /* numéro de série de la clé relevé */
+    unsigned        serie;      /* ... celui de la clé d'origine */
+    unsigned        branchement;/* branchement où le fichier a été lu */
+    bool            attente;    /* pistes en attente de la clé */
 } copie_t;
 
 static copie_t s_loci[NB_LECTEURS], s_microdisc[NB_LECTEURS];
 static const char* s_microdisc_path[NB_LECTEURS];
 static int s_calme = -1;        /* trames depuis la dernière écriture ; -1 : rien */
+static int s_attente;           /* trames depuis le dernier essai (clé absente) */
 
 void disquette_set_microdisc_path(int drive, const char* path) {
     if (drive >= 0 && drive < NB_LECTEURS) s_microdisc_path[drive] = path;
@@ -105,14 +123,60 @@ static void oublier(copie_t* c) {
     memset(c, 0, sizeof(*c));
 }
 
+/* Disquette (image, chemin) dans ce lecteur : nouvelle, on oublie l'ancienne
+ * et on relève la clé dont elle vient (sa clé est là : elle vient d'être lue) */
+static void associer(copie_t* c, const uint8_t* image, const char* path) {
+    if (c->image == image && strncmp(c->path, path, sizeof(c->path)) == 0) return;
+    oublier(c);                 /* autre disquette dans le lecteur */
+    c->image = image;
+    strncpy(c->path, path, sizeof(c->path) - 1);
+    unsigned serie = 0, branchement = 0;
+    int etat = cles_usb_etat(path, &serie, &branchement);
+    c->cle = etat >= 0;
+    if (etat == 1) {
+        c->serie_lue = true;
+        c->serie = serie;
+        c->branchement = branchement;
+    }
+}
+
+/* Disquette d'une clé : peut-on écrire maintenant ? (sinon : en attente) */
+static bool cle_prete(copie_t* c) {
+    unsigned serie = 0, branchement = 0;
+    int etat = cles_usb_etat(c->path, &serie, &branchement);
+    if (etat == 0) {
+        if (!c->attente) log_warning("[port] %s: USB key removed, write-back postponed", c->path);
+        c->attente = true;
+        return false;
+    }
+    if (!c->serie_lue) {        /* clé absente quand la disquette a été vue */
+        c->serie_lue = true;
+        c->serie = serie;
+        c->branchement = branchement;
+    }
+    if (serie != c->serie) {
+        if (!c->attente)
+            log_warning("[port] %s: another USB key (serial %08X, not %08X), nothing written",
+                        c->path, serie, c->serie);
+        c->attente = true;
+        return false;
+    }
+    if (branchement != c->branchement) {
+        /* même clé, remise : fichier relu (il a pu changer ailleurs) */
+        sedoric_destroy(c->fichier);
+        c->fichier = NULL;
+        c->branchement = branchement;
+        log_info("[port] %s: USB key back, pending tracks written back", c->path);
+    }
+    c->attente = false;
+    return true;
+}
+
 /* Réécrit dans le fichier les pistes où l'image diffère de son contenu. */
 static void sauver(copie_t* c, const uint8_t* image, uint32_t size, const char* path) {
-    if (c->image != image || strncmp(c->path, path, sizeof(c->path)) != 0) {
-        oublier(c);             /* autre disquette dans le lecteur */
-        c->image = image;
-        strncpy(c->path, path, sizeof(c->path) - 1);
-    }
+    associer(c, image, path);
     if (c->refus) return;
+    if (c->cle && !cle_prete(c)) return;
 
     if (!c->fichier) {
         c->fichier = sedoric_load(path);
@@ -154,10 +218,12 @@ static void sauver(copie_t* c, const uint8_t* image, uint32_t size, const char* 
     if (fp && fclose(fp) != 0) echec = true;
 
     if (echec) {
-        /* fichier dans un état inconnu : relu à la prochaine réécriture */
+        /* fichier dans un état inconnu : relu à la prochaine réécriture ;
+         * clé retirée pendant l'écriture : nouvel essai à son retour */
         log_error("[port] %s: write-back failed", path);
         sedoric_destroy(c->fichier);
         c->fichier = NULL;
+        if (c->cle) c->attente = true;
     } else if (n > 0) {
         log_info("[port] %s: %d track(s) written back", path, n);
     }
@@ -180,12 +246,31 @@ void disquette_service(emulator_t* emu) {
             }
         }
     }
+    /* Disquette nouvellement montée : sa clé est relevée tout de suite */
+    for (int d = 0; d < NB_LECTEURS; d++) {
+        const loci_t* l = &emu->loci;
+        if (emu->card_on[CARD_IDX_loci] && l->dsk_image[d] && !l->dsk_web[d] && l->dsk_host_path[d][0])
+            associer(&s_loci[d], l->dsk_image[d], l->dsk_host_path[d]);
+        const sedoric_disk_t* disk = emu->disks[d];
+        if (emu->card_on[CARD_IDX_microdisc] && disk && disk->data && s_microdisc_path[d])
+            associer(&s_microdisc[d], disk->data, s_microdisc_path[d]);
+    }
     if (ecrit) {
         s_calme = 0;
         return;
     }
-    if (s_calme < 0 || ++s_calme < DISQUETTE_DELAI_TRAMES) return;
-    disquette_flush(emu);
+    if (s_calme >= 0 && ++s_calme >= DISQUETTE_DELAI_TRAMES) {
+        disquette_flush(emu);
+        return;
+    }
+    /* Pistes en attente d'une clé retirée : nouvel essai régulier */
+    bool attente = false;
+    for (int d = 0; d < NB_LECTEURS; d++)
+        attente = attente || s_loci[d].attente || s_microdisc[d].attente;
+    if (attente && ++s_attente >= DISQUETTE_ATTENTE) {
+        s_attente = 0;
+        disquette_flush(emu);
+    }
 }
 
 /* Chemin ramené à une forme comparable : sans « SD: » ni « / » ou « ./ » en

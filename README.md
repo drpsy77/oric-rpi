@@ -83,7 +83,14 @@ défaut `real`, vitesse du vrai lecteur).
 
 LOCI : `loci=1`, et **pas** de `rom=` : la ROM système est alors le menu
 (`oric/loci/locirom`). `lociflash=` et `lociusb=` changent les deux
-dossiers. Menu : flèches, Espace pour ouvrir/choisir, Échap pour démarrer
+dossiers. Les vraies clés USB branchées sur la Pi (deux au plus, FAT ou
+exFAT) sont servies en plus, après `lociusb` (« 3: » et « 4: » avec le
+modem), ou la première à sa place avec `clesusb=remplace` (`clesusb=non` :
+aucune). On les branche et les retire à chaud, sans prévenir, comme sur le
+vrai LOCI : sans clé, sa place affiche « MSC no USB key » et CP/A répond par
+une erreur. Une disquette montée depuis une clé reste en mémoire : l'Oric
+continue de s'en servir clé retirée, et les écritures sont reportées sur la
+clé quand elle revient (la même seulement, reconnue par son numéro de série). Menu : flèches, Espace pour ouvrir/choisir, Échap pour démarrer
 l'Oric, Entrée pour reprendre la session interrompue par F8 (depuis
 Phosphoric 2.31.6).
 

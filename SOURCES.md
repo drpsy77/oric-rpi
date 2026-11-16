@@ -67,7 +67,7 @@ captures AVI/images, traces/profilage, CLI, hostfs, fast-load et auto-frappe.
 | `tftp.cpp`, `tftp.h` | Serveur TFTP de la carte SD (`tftp=`) : fichiers en mémoire, carte touchée entre deux trames, remplacement par renommage, disquettes montées protégées | Écrit pour le port, sur `CTFTPDaemon` de Circle (`lib/net/tftpdaemon.cpp`) ; appels de FatFs comme Circle `addon/tftpfileserver/tftpfatfsfileserver.cpp` |
 | `carte.cpp`, `carte.h` | Accès à la carte depuis le réseau, commun à TFTP et à la page web : client autorisé, noms, lecture, remplacement par renommage, disquettes montées protégées | Écrit pour le port (repris de `tftp.cpp`) |
 | `web.cpp`, `web.h` | Page web de la carte SD (`web=`) : liste, lecture, envoi, état, redémarrage | Écrit pour le port, sur `CHTTPDaemon` de Circle (`lib/net/httpdaemon.cpp`), dérivé comme Circle `sample/21-webserver` |
-| `cles.cpp`, `cles.h` | Clés USB de la Pi : volumes `USB:`/`USB2:` montés au branchement, démontés au retrait, décrits dans le journal | Écrit pour le port (FatFs et diskio de Circle `addon/fatfs`) |
+| `cles.cpp`, `cles.h` | Clés USB de la Pi servies par LOCI : volumes `USB:`/`USB2:` montés au branchement, démontés au retrait ; `statvfs` des volumes FatFs | Écrit pour le port (FatFs et diskio de Circle `addon/fatfs`) |
 | `mdns.cpp`, `mdns.h` | mDNS : réponse pour `nom.local`, recherche des noms en `.local` (TFTP, modem) | Écrit pour le port (RFC 1035 et 6762) ; ouverture de la socket comme Circle `lib/net/mdnsdaemon.cpp` |
 | `main.cpp` | Point d'entrée | **Copie à l'identique** de circle-stdlib `samples/03-stdio-fatfs/main.cpp` |
 | `kernel.h` | Classe du kernel | Structure reprise de circle-stdlib `samples/03-stdio-fatfs/kernel.h` |
