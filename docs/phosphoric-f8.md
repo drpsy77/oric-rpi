@@ -1,4 +1,4 @@
-# Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage, +++ du modem, cassette sous ROMDIS
+# Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage, +++ du modem, cassette sous ROMDIS, démarrage de LOCI (MIA_BOOT)
 
 À envoyer à bmarty. Constaté sur le port Circle (Pi 3B+) et sur Phosphoric
 natif (Linux) ; les cinq points sont revus sur **Phosphoric 2.31.15**
@@ -193,3 +193,62 @@ Les disquettes montées depuis une clé restent en mémoire (comme toutes les
 disquettes de Phosphoric) ; `disquette.c` ne réécrit leurs pistes que sur la
 même clé (numéro de série du volume).
 
+
+## 9. MIA_BOOT : CP/A redémarre au lieu du BASIC, chargement automatique ignoré
+
+Comparé au firmware de LOCI (sodiumlb/loci-firmware `54f6147`,
+`src/mia/sys/mia.c`, `mia_task`, et `src/mia/api/api.h`). Quand l'Oric
+envoie l'ordre `$A0` (MIA_BOOT), le vrai LOCI :
+
+1. charge la ROM BASIC (1.0 ou 1.1) ;
+2. avec une cassette (`LOCI_BOOT_TAP`), modifie la ROM : synchronisation,
+   lecture des bits et des octets, écriture ;
+3. avec le chargement automatique (`LOCI_BOOT_TAP_ALD`), ajoute deux
+   modifications : la préparation de `CLOAD""` dans la place libérée par la
+   synchronisation (`$E738` en 1.1, `$E699` en 1.0) et un saut vers elle à
+   la place du `JMP $C4A8` qui finit le démarrage à froid (`$ED83` en 1.1,
+   `$EB3E` en 1.0) ;
+4. rend la ROM BASIC visible (`mia_set_rom_ram_enable(false, true)` ; avec
+   le Microdisc, `(true, false)`) et rend la main par `JMP ($FFFC)`
+   (`api_return_boot`).
+
+Phosphoric 2.31.15 (`op_mia_boot`, `src/io/loci_boot.c`, et
+`loci_rom_swap_cb`, `src/io/loci_glue.c`) charge la ROM et remet le 6502 à
+zéro (`cpu_reset`), mais :
+
+- **ne rend pas la ROM visible** : `memory.basic_rom_disabled` et
+  `overlay_active` (ROMDIS, `$0314` de LOCI ou du Microdisc) restent tels
+  quels. Depuis le menu, rien n'est en overlay et le démarrage marche ; depuis
+  un programme en RAM overlay (CP/A, `USBMOUNT JEU.TAP /B`, drapeaux `$96`),
+  `cpu_reset` lit le vecteur `$FFFC` dans cette RAM : CP/A redémarre à chaud
+  au lieu du BASIC ;
+- **ignore `LOCI_BOOT_TAP_ALD`** (défini dans `loci.h`, jamais lu) ; le
+  commentaire de `loci_tape_mount_cb` prévoit que l'utilisateur tape
+  `CLOAD""`, même quand le chargement automatique est coché dans le menu.
+
+L'étape 2 n'est pas nécessaire dans Phosphoric : `tape_patches` intercepte
+ces routines (et prend `GetSync` à son entrée, avant le saut de la
+synchronisation).
+
+Reproduit en natif (CP/A sur le Microdisc avec `--loci`, ou servi par LOCI
+avec le patch 7 : `--loci-disk 0:/cpa.dsk`), `USBMOUNT 1:/SNAKE.TAP /B` :
+sans correction, l'invite `A>` de CP/A revient ; avec, le BASIC 1.1 démarre,
+charge la cassette tout seul et SNAKE (code machine, lancement
+automatique) se lance.
+
+Proposition (faite et testée dans le patch 14 de `bureau/patches/`) :
+
+- `loci_rom_swap_cb` : ROM BASIC visible avant le `cpu_reset` du `$C000`
+  (drapeaux de la mémoire, `dsk_ctrl` de LOCI bits 7 et 1 à 1, `romdis` et
+  `diskrom` du Microdisc s'il est présent), ROMDIS et ROM du Microdisc pour
+  le `$A000` ;
+- `op_mia_boot` : après le `$C000`, avec `LOCI_BOOT_TAP`,
+  `LOCI_BOOT_TAP_ALD`, une cassette montée et la ROM BASIC de LOCI (pas une
+  ROM montée), les trois modifications du firmware (synchronisation,
+  préparation, saut), octets recopiés de `mia.c`, par `rom_poke_cb`. Trois
+  tests dans `test_loci.c` (1.1, 1.0, cas sans effet).
+
+Contournement dans le port : `__wrap_loci_rom_swap_cb` (`oric_machine.c`,
+`--wrap` dans le `Makefile`) fait les deux à la fois, après la fonction
+d'origine : ROM rendue visible, modifications si une cassette est chargée,
+nouveau `cpu_reset`.

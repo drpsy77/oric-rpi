@@ -1,0 +1,243 @@
+From 25eafc85610d57de1153c00a860d3bdbd8ca7372 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 19 Nov 2026 17:16:34 +0100
+Subject: [PATCH 14/14] LOCI MIA_BOOT comme le firmware : ROM BASIC visible avant le
+ reset, chargement automatique de la cassette (LOCI_BOOT_TAP_ALD) ; reprise du
+ port oric-rpi
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Lancé depuis un programme en RAM overlay sous ROMDIS (CP/A, USBMOUNT x.TAP /B),
+MIA_BOOT chargeait la ROM BASIC mais le 6502 relisait le vecteur $FFFC dans la
+RAM overlay : le programme redémarrait au lieu du BASIC. Le firmware
+(loci-firmware 54f6147, mia.c) rend la ROM visible
+(mia_set_rom_ram_enable(false, true)) avant JMP ($FFFC).
+
+Le drapeau LOCI_BOOT_TAP_ALD était ignoré (CLOAD"" à taper, même depuis le
+menu) : les modifications du firmware (synchronisation, préparation de
+CLOAD"" et saut en fin de démarrage à froid, $E735/$E738/$ED83 en 1.1,
+$E696/$E699/$EB3E en 1.0) sont posées par rom_poke_cb, cassette montée.
+---
+ src/io/loci_boot.c     | 48 ++++++++++++++++++++++++++++
+ src/io/loci_glue.c     | 27 ++++++++++++++--
+ tests/unit/test_loci.c | 71 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 144 insertions(+), 2 deletions(-)
+
+diff --git a/src/io/loci_boot.c b/src/io/loci_boot.c
+index ec2bbde..c871b05 100644
+--- a/src/io/loci_boot.c
++++ b/src/io/loci_boot.c
+@@ -24,6 +24,53 @@ static const char* derive_basic_rom_path(loci_t* loci, uint8_t settings) {
+     return (settings & LOCI_BOOT_B11) ? "basic11b.rom" : "basic10.rom";
+ }
+ 
++/* Tape autoload, as the firmware does (loci-firmware mia.c, mia_task):
++ * with a tape and LOCI_BOOT_TAP_ALD, the BASIC ROM ends its cold start with
++ * CLOAD"" instead of JMP to READY. The firmware's synch patch frees room in
++ * GetSync for the CLOAD"" setup. Its byte/bit/write patches (MIA tape
++ * registers) are not needed here: tape_patches intercepts these routines
++ * (it traps GetSync at its entry, before the synch JMP). Bytes copied from
++ * mia.c (github.com/sodiumlb/loci-firmware 54f6147, (c) 2023 Rumbledethumps,
++ * (c) 2024 Sodiumlightbaby, BSD-3-Clause). */
++static const uint8_t k_synch_11[] = { 0x4C, 0x4D, 0xE7 };          /* $E735 JMP $E74D */
++static const uint8_t k_synch_10[] = { 0x4C, 0xAD, 0xE6 };          /* $E696 JMP $E6AD */
++static const uint8_t k_ald_setup_11[] = {                          /* $E738 */
++    0xA9, 0x22, 0x85, 0x35, 0xA9, 0x00, 0x85, 0x36,                /* '"',0 at $35  */
++    0x85, 0xEA, 0xA9, 0x34, 0x85, 0xE9, 0xA9, 0xB6,                /* TXTPTR $0034  */
++    0x38, 0x4C, 0x0F, 0xC9                                         /* CLOAD token, JMP $C90F */
++};
++static const uint8_t k_ald_setup_10[] = {                          /* $E699 */
++    0xA9, 0x22, 0x85, 0x35, 0xA9, 0x00, 0x85, 0x36,
++    0x85, 0xEA, 0xA9, 0x34, 0x85, 0xE9, 0xA9, 0xB6,
++    0x38, 0x4C, 0xF8, 0xC8                                         /* JMP $C8F8 */
++};
++static const uint8_t k_ald_jump_11[] = { 0x4C, 0x38, 0xE7 };       /* $ED83 (was JMP $C4A8) */
++static const uint8_t k_ald_jump_10[] = { 0x4C, 0x99, 0xE6 };       /* $EB3E */
++
++static void rom_poke_bytes(loci_t* loci, uint16_t addr, const uint8_t* p, size_t n) {
++    for (size_t i = 0; i < n; i++)
++        loci->rom_poke_cb(loci->rom_poke_ctx, (uint16_t)(addr + i), p[i]);
++}
++
++static void mia_boot_tape_autoload(loci_t* loci, uint8_t settings) {
++    if (!(settings & LOCI_BOOT_TAP) || !(settings & LOCI_BOOT_TAP_ALD)) return;
++    /* Firmware: only for its own BASIC ROM (not a mounted ROM). Here also
++     * only with a tape mounted: without one, CLOAD would wait forever. */
++    if (!loci->rom_poke_cb || loci->mnt_mounted[LOCI_MNT_ROM] ||
++        !loci->mnt_mounted[LOCI_MNT_TAP]) return;
++    if (settings & LOCI_BOOT_B11) {
++        rom_poke_bytes(loci, 0xE735, k_synch_11, sizeof k_synch_11);
++        rom_poke_bytes(loci, 0xE738, k_ald_setup_11, sizeof k_ald_setup_11);
++        rom_poke_bytes(loci, 0xED83, k_ald_jump_11, sizeof k_ald_jump_11);
++    } else {
++        rom_poke_bytes(loci, 0xE696, k_synch_10, sizeof k_synch_10);
++        rom_poke_bytes(loci, 0xE699, k_ald_setup_10, sizeof k_ald_setup_10);
++        rom_poke_bytes(loci, 0xEB3E, k_ald_jump_10, sizeof k_ald_jump_10);
++    }
++    log_info("LOCI MIA_BOOT: tape autoload (CLOAD\"\" at the end of the BASIC %s cold start)",
++             (settings & LOCI_BOOT_B11) ? "1.1" : "1.0");
++}
++
+ void op_mia_boot(loci_t* loci) {
+     uint8_t settings = loci->regs[LOCI_REG_API_A];
+     loci->boot_settings = settings;
+@@ -61,6 +108,7 @@ void op_mia_boot(loci_t* loci) {
+         api_return_errno(loci, LOCI_EIO);
+         return;
+     }
++    mia_boot_tape_autoload(loci, settings);
+ 
+     if (settings & LOCI_BOOT_FDC) {
+         const char* disc_path = "microdis.rom";
+diff --git a/src/io/loci_glue.c b/src/io/loci_glue.c
+index e65c4a8..f71bbfa 100644
+--- a/src/io/loci_glue.c
++++ b/src/io/loci_glue.c
+@@ -162,8 +162,9 @@ bool loci_tape_mount_cb(void* ctx, const char* host_tape_path) {
+     emu->tape_syncstack = -1;
+     /* Do NOT trigger auto-CLOAD here: when LOCI mounts the tape, the
+      * LOCI ROM is still in control. Auto-typed keystrokes would land
+-     * in the LOCI TUI, not BASIC. The user will type CLOAD"" after
+-     * MIA_BOOT swaps in BASIC. */
++     * in the LOCI TUI, not BASIC. MIA_BOOT with LOCI_BOOT_TAP_ALD patches
++     * BASIC to run CLOAD"" itself, like the firmware (loci_boot.c);
++     * without it, the user types CLOAD"". */
+     emu->tape_auto_cload_pending = false;
+     log_info("LOCI tape mount: %s buffered (%ld bytes, type CLOAD\"\" in BASIC)",
+              host_tape_path, sz);
+@@ -172,6 +173,22 @@ bool loci_tape_mount_cb(void* ctx, const char* host_tape_path) {
+ 
+ static bool loci_rom_map_c000(emulator_t* emu, const char* rom_path);
+ 
++/* MIA_BOOT ROM mapping, like the firmware's mia_set_rom_ram_enable: BASIC
++ * ROM visible (fdc false), or ROMDIS with the Microdisc ROM at $E000 (fdc
++ * true). The $0314 control state of whoever drives ROMDIS (LOCI's own disk
++ * controller, or the Microdisc card) follows: bit 7 set = no EPROM, bit 1
++ * set = BASIC ROM. */
++static void loci_boot_map(emulator_t* emu, bool fdc) {
++    emu->memory.basic_rom_disabled = fdc;
++    emu->memory.overlay_active     = fdc;
++    emu->loci.dsk_ctrl = fdc ? (uint8_t)(emu->loci.dsk_ctrl & ~0x82)
++                             : (uint8_t)(emu->loci.dsk_ctrl | 0x82);
++    if (emu->card_on[CARD_IDX_microdisc]) {
++        emu->microdisc.romdis  = fdc;
++        emu->microdisc.diskrom = fdc;
++    }
++}
++
+ bool loci_rom_swap_cb(void* ctx, const char* rom_path, uint16_t base_addr) {
+     emulator_t* emu = (emulator_t*)ctx;
+     if (!emu || !rom_path || !*rom_path) return false;
+@@ -216,6 +233,7 @@ bool loci_rom_swap_cb(void* ctx, const char* rom_path, uint16_t base_addr) {
+         emu->memory.overlay_rom_size    = (uint32_t)sz;
+         emu->memory.overlay_active      = true;
+         emu->memory.basic_rom_disabled  = true;   /* romdis = ROM disable signal */
++        loci_boot_map(emu, true);
+         log_info("LOCI ROM swap: microdisc overlay activated ($E000+, %ld bytes from %s)",
+                  sz, rom_path);
+         /* Re-reset CPU so $FFFC reset vector is fetched from Microdisc
+@@ -230,6 +248,11 @@ bool loci_rom_swap_cb(void* ctx, const char* rom_path, uint16_t base_addr) {
+         return true;
+     }
+     if (!loci_rom_map_c000(emu, rom_path)) return false;
++    /* Firmware (mia_set_rom_ram_enable(false, true) before api_return_boot's
++     * JMP ($FFFC)): the new ROM is made visible. Booted from a program
++     * running in overlay RAM under ROMDIS (CP/A), the reset vector was read
++     * from that RAM and the program restarted instead of BASIC. */
++    loci_boot_map(emu, false);
+     /* Reset the 6502 so it re-reads the new $FFFC reset vector. */
+     cpu_reset(&emu->cpu);
+     return true;
+diff --git a/tests/unit/test_loci.c b/tests/unit/test_loci.c
+index 05e0d3a..d95b6c2 100644
+--- a/tests/unit/test_loci.c
++++ b/tests/unit/test_loci.c
+@@ -1611,6 +1611,74 @@ TEST(test_mia_boot_fdc_loads_microdisc_too) {
+     ASSERT_TRUE(strstr(cap.last_path, "microdis") != NULL);
+ }
+ 
++/* MIA_BOOT tape autoload (firmware mia.c): with TAP + TAP_ALD and a tape
++ * mounted, the BASIC ROM gets the synch patch, the CLOAD"" setup and the
++ * jump at the end of its cold start. */
++static uint8_t poked_rom[0x4000];
++static int poke_count;
++static void capture_poke(void* ctx, uint16_t addr, uint8_t val) {
++    (void)ctx;
++    if (addr >= 0xC000) poked_rom[addr - 0xC000] = val;
++    poke_count++;
++}
++
++static void mia_boot_with(loci_t* l, rom_swap_capture_t* cap, uint8_t settings,
++                          bool tape, bool rom) {
++    loci_init(l);
++    l->enabled = true;
++    loci_set_rom_swap_callback(l, capture_swap, cap);
++    loci_set_rom_poke_callback(l, capture_poke, NULL);
++    memset(poked_rom, 0, sizeof poked_rom);
++    poke_count = 0;
++    l->mnt_mounted[LOCI_MNT_TAP] = tape;
++    if (rom) {
++        l->mnt_mounted[LOCI_MNT_ROM] = true;
++        strcpy(l->mnt_paths[LOCI_MNT_ROM], "custom.rom");
++    }
++    l->regs[LOCI_REG_API_A] = settings;
++    loci_write(l, 0x03AF, LOCI_OP_MIA_BOOT);
++}
++
++TEST(test_mia_boot_tape_autoload_b11) {
++    rom_swap_capture_t cap = { .result = true };
++    loci_t l;
++    mia_boot_with(&l, &cap, LOCI_BOOT_FAST | LOCI_BOOT_TAP_ALD | LOCI_BOOT_B11 |
++                  LOCI_BOOT_TAP, true, false);
++    ASSERT_EQ(poke_count, 26);
++    ASSERT_EQ(poked_rom[0xE735 - 0xC000], 0x4C);   /* JMP $E74D */
++    ASSERT_EQ(poked_rom[0xE736 - 0xC000], 0x4D);
++    ASSERT_EQ(poked_rom[0xE738 - 0xC000], 0xA9);   /* LDA #'"' */
++    ASSERT_EQ(poked_rom[0xE74A - 0xC000], 0x0F);   /* JMP $C90F */
++    ASSERT_EQ(poked_rom[0xE74B - 0xC000], 0xC9);
++    ASSERT_EQ(poked_rom[0xED83 - 0xC000], 0x4C);   /* JMP $E738 */
++    ASSERT_EQ(poked_rom[0xED84 - 0xC000], 0x38);
++    ASSERT_EQ(poked_rom[0xED85 - 0xC000], 0xE7);
++}
++
++TEST(test_mia_boot_tape_autoload_b10) {
++    rom_swap_capture_t cap = { .result = true };
++    loci_t l;
++    mia_boot_with(&l, &cap, LOCI_BOOT_TAP_ALD | LOCI_BOOT_TAP, true, false);
++    ASSERT_EQ(poke_count, 26);
++    ASSERT_EQ(poked_rom[0xE696 - 0xC000], 0x4C);   /* JMP $E6AD */
++    ASSERT_EQ(poked_rom[0xE6AB - 0xC000], 0xF8);   /* JMP $C8F8 */
++    ASSERT_EQ(poked_rom[0xEB3F - 0xC000], 0x99);   /* JMP $E699 */
++}
++
++TEST(test_mia_boot_tape_autoload_needs_flag_tape_and_basic) {
++    rom_swap_capture_t cap = { .result = true };
++    loci_t l;
++    mia_boot_with(&l, &cap, LOCI_BOOT_B11 | LOCI_BOOT_TAP, true, false);
++    ASSERT_EQ(poke_count, 0);                      /* no TAP_ALD */
++    mia_boot_with(&l, &cap, LOCI_BOOT_B11 | LOCI_BOOT_TAP | LOCI_BOOT_TAP_ALD, false, false);
++    ASSERT_EQ(poke_count, 0);                      /* no tape mounted */
++    mia_boot_with(&l, &cap, LOCI_BOOT_B11 | LOCI_BOOT_TAP | LOCI_BOOT_TAP_ALD, true, true);
++    ASSERT_EQ(poke_count, 0);                      /* mounted ROM, not BASIC */
++    cap.result = false;
++    mia_boot_with(&l, &cap, LOCI_BOOT_B11 | LOCI_BOOT_TAP | LOCI_BOOT_TAP_ALD, true, false);
++    ASSERT_EQ(poke_count, 0);                      /* ROM swap failed */
++}
++
+ /* ── 34af: TAP cassette API + $0315-$0317 ────────────────────── */
+ 
+ /* Build a minimal TAP file with one sync mark + 16-byte header.
+@@ -3625,6 +3693,9 @@ int main(void) {
+     RUN(test_mia_boot_no_callback_acks);
+     RUN(test_mia_boot_settings_latched);
+     RUN(test_mia_boot_fdc_loads_microdisc_too);
++    RUN(test_mia_boot_tape_autoload_b11);
++    RUN(test_mia_boot_tape_autoload_b10);
++    RUN(test_mia_boot_tape_autoload_needs_flag_tape_and_basic);
+     RUN(test_tap_mount_opens_file);
+     RUN(test_tap_umount_closes);
+     RUN(test_tap_tell_returns_zero_after_mount);
+-- 
+2.39.5
+

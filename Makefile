@@ -50,6 +50,9 @@ LDFLAGS += $(foreach f,$(NETRELAY_WRAP),--wrap=$(f))
 
 # ACIA sans cadence, comme le vrai LOCI (oric_machine.c, __wrap_acia_write)
 LDFLAGS += --wrap=acia_write
+# Démarrage de LOCI comme le firmware : ROM BASIC visible, chargement
+# automatique de la cassette (oric_machine.c, __wrap_loci_rom_swap_cb)
+LDFLAGS += --wrap=loci_rom_swap_cb
 # Taille des volumes FatFs pour le menu de LOCI (cles.cpp, __wrap_statvfs)
 LDFLAGS += --wrap=statvfs
 

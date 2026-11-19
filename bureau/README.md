@@ -41,6 +41,7 @@ Windows (SDL2 pour MinGW est téléchargé), emsdk actif pour le web
 | 11 | Windows : pile de 16 Mo (débordement au démarrage) | correctif |
 | 12 | `--disk-autosave` : pistes modifiées réécrites 2 s après la dernière écriture (Microdisc et LOCI, MFM compris), à la sortie et avant un changement de disquette ; web : disquettes gardées par le navigateur, bouton DSK (téléchargement), IDBFS des Emscripten récents | `disquette.c`, point 3 |
 | 13 | Horloge : débordement de la dernière instruction de la trame reporté sur la suivante (`emu_clock_frame_begin`) : le faisceau garde exactement 19 968 cycles par trame, un T1 à 50 Hz reste calé (VSYNC.COM de CP/A) | constat du port, correction amont |
+| 14 | LOCI, MIA_BOOT comme le firmware : ROM BASIC visible avant le reset (depuis CP/A, `USBMOUNT x.TAP /B` redémarrait CP/A), chargement automatique de la cassette (`LOCI_BOOT_TAP_ALD` : modifications de la ROM de `mia.c`) ; 3 tests | `__wrap_loci_rom_swap_cb`, point 9 |
 
 Les patchs 3 et 11 corrigent le build Windows de la 2.31.15 lui-même : sans
 eux, il ne se lie pas, puis plante au démarrage.
@@ -54,6 +55,9 @@ publique au lieu d'être copiée comme dans `disquette.c`.
 - Tests de Phosphoric touchés : clavier (41, dont 5 nouveaux pour `-k fr` et
   `--kma`), menu F1, picowifi (77, dont `+++` sur ligne calme, qui échoue
   sans le patch 8), ACIA, cassette, LOCI (167), CLI.
+- Patch 14 (natif) : `USBMOUNT 1:/SNAKE.TAP /B` sous CP/A, sur le Microdisc
+  et avec `--loci-disk` : BASIC 1.1, cassette chargée seule, SNAKE lancé ;
+  `test-loci` 170/170, `test-loci-e2e`, `test-tape-roundtrip`.
 - Windows (sous Wine) : LOCI + `--loci-disk 0:/cpa-en.dsk` démarre CP/A ;
   `REMOTE 127.0.0.1:port` donne `CONNECT 9600` par Winsock, `+++` reconnu.
 - Web (Chrome) : touches physiques Q, 1, M, W, `;`, `:`, ù, ! donnent

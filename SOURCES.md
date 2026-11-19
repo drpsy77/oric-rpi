@@ -12,6 +12,7 @@ n'ajoute que le strict nécessaire pour le faire tourner sous Circle.
 | Circle — environnement bare-metal C++ pour Raspberry Pi | <https://github.com/rsta2/circle> — © R. Stange | GPL-3.0 | dépendance externe | Non |
 | circle-stdlib — newlib (libc) au-dessus de Circle, `fopen` sur la carte SD | <https://github.com/smuehlst/circle-stdlib> — © S. Mühlstrasser | GPL-3.0 | dépendance externe | Non |
 | ROM du menu LOCI v0.3.0 (`locirom`) | <https://github.com/sodiumlb/loci-rom>, livrée par Phosphoric dans `roms/loci/` (notice copiée avec) — © 2024 Sodiumlightbaby | BSD-3-Clause | `phosphoric/roms/loci/` | Non |
+| Firmware de LOCI : octets des modifications de la ROM BASIC pour le chargement automatique de la cassette (`mia_synch_patch_*`, `mia_autoload_*_patch_*` de `src/mia/sys/mia.c`) | <https://github.com/sodiumlb/loci-firmware>, commit `54f6147` — © 2023 Rumbledethumps, © 2024 Sodiumlightbaby | BSD-3-Clause | `oric_machine.c` (`__wrap_loci_rom_swap_cb`) | Non (octets recopiés tels quels) |
 | Firmware Raspberry Pi (`bootcode.bin`, `start.elf`, `fixup.dat`) | téléchargé par `make` dans `libs/circle/boot` de circle-stdlib | Broadcom (`LICENCE.broadcom`) | carte SD seulement | Non |
 | Firmware Wi-Fi (`firmware/brcmfmac*`) | téléchargé par `make firmware` dans `libs/circle/addon/wlan/firmware` de circle-stdlib (RPi-Distro/firmware-nonfree) | Broadcom / Cypress | carte SD seulement | Non |
 | Valeurs des couleurs Tele (`kernel.cpp`) | cpa-oric `tools/remote.html` et `docs/console-distance.md` § 9 — © Pierre | même auteur | `kernel.cpp` | Non |

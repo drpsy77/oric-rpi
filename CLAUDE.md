@@ -332,8 +332,11 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   montage au démarrage (`locidisk`), `+++` non reconnu sur une ligne calme
   (contourné), cassette interceptée sous ROMDIS (contourné), débordement
   de la dernière instruction de chaque trame perdu (point 7, contourné ;
-  VSYNC.COM de CP/A). Les mêmes corrections, en patchs de Phosphoric, sont
-  dans `bureau/`.
+  VSYNC.COM de CP/A), MIA_BOOT qui laisse la RAM overlay en place (CP/A
+  redémarre au lieu du BASIC après `USBMOUNT x.TAP /B`) et ignore le
+  chargement automatique de la cassette (point 9, contourné par
+  `__wrap_loci_rom_swap_cb`, octets du firmware de LOCI, 19/11/2026).
+  Les mêmes corrections, en patchs de Phosphoric, sont dans `bureau/`.
 - **Réseau sans retirer la carte, vérifié sur la 3B+ (16/11/2026)** : la Pi
   répond à `oric.local` (10.0.0.23) ; `tftp=cyberlab.local` résolu par mDNS
   (10.0.0.38) ; journal lu par TFTP (`journal.txt` ouvert compris, entier) ;

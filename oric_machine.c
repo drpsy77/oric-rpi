@@ -434,6 +434,94 @@ static void esc_hook(serial_backend_t* modem) {
     modem->poll = esc_poll;
 }
 
+/* ── [port] Démarrage de LOCI (MIA_BOOT) comme le firmware (ajout du port) ─ */
+/* op_mia_boot (loci_boot.c) charge la ROM BASIC par loci_rom_swap_cb, qui
+ * remet le 6502 à zéro, mais laisse ROMDIS et la RAM overlay en place : lancé
+ * depuis CP/A (/B, ordre $A0 de LOCI), le 6502 relit le vecteur $FFFC de la
+ * RAM overlay et CP/A redémarre à chaud. Le drapeau « chargement automatique »
+ * (LOCI_BOOT_TAP_ALD) est ignoré : CLOAD"" à taper, même depuis le menu. Le
+ * firmware (sodiumlb/loci-firmware 54f6147, mia.c, mia_task) rend la ROM
+ * BASIC visible (mia_set_rom_ram_enable(false, true), Microdisc :
+ * (true, false)) puis JMP ($FFFC) (api_return_boot), et, avec une cassette,
+ * modifie la ROM : ses lectures et écritures (ici, les interceptions de
+ * tape_patches les remplacent) et, avec le chargement automatique, deux
+ * modifications qui exécutent CLOAD"" à la fin du démarrage à froid. Le port
+ * détourne loci_rom_swap_cb (--wrap, voir Makefile ; appelée par MIA_BOOT,
+ * pointeur pris dans card_loci.c, et par locidisk.c, Microdisc sans
+ * cassette : même état final) : ROM BASIC rendue visible, modifications du firmware
+ * pour le chargement automatique, nouvelle remise à zéro. Signalé à bmarty
+ * (docs/phosphoric-f8.md, point 9). */
+
+/* Octets copiés de mia.c (github.com/sodiumlb/loci-firmware 54f6147,
+ * © 2023 Rumbledethumps, © 2024 Sodiumlightbaby, BSD-3-Clause ; voir
+ * SOURCES.md). Synchronisation : JMP après la
+ * recherche des bits ; préparation de CLOAD"" (dans la place libérée par la
+ * précédente) ; saut vers elle à la place du JMP de fin de démarrage. */
+static const uint8_t k_synch_11[] = { 0x4C, 0x4D, 0xE7 };
+static const uint8_t k_synch_10[] = { 0x4C, 0xAD, 0xE6 };
+static const uint8_t k_ald_setup_11[] = {
+    0xA9, 0x22, 0x85, 0x35, 0xA9, 0x00, 0x85, 0x36,
+    0x85, 0xEA, 0xA9, 0x34, 0x85, 0xE9, 0xA9, 0xB6,
+    0x38, 0x4C, 0x0F, 0xC9
+};
+static const uint8_t k_ald_setup_10[] = {
+    0xA9, 0x22, 0x85, 0x35, 0xA9, 0x00, 0x85, 0x36,
+    0x85, 0xEA, 0xA9, 0x34, 0x85, 0xE9, 0xA9, 0xB6,
+    0x38, 0x4C, 0xF8, 0xC8
+};
+static const uint8_t k_ald_jump_11[] = { 0x4C, 0x38, 0xE7 };
+static const uint8_t k_ald_jump_10[] = { 0x4C, 0x99, 0xE6 };
+
+static void rom_poke(emulator_t* emu, uint16_t addr, const uint8_t* p, size_t n) {
+    memcpy(&emu->memory.rom[addr - 0xC000], p, n);
+}
+
+/* ROM BASIC visible ($C000) ou ROM du Microdisc en $E000 sous ROMDIS ($A000),
+ * comme le registre $0314 (bit 7 à 1 : pas d'EPROM, bit 1 à 1 : ROM BASIC). */
+static void boot_map(emulator_t* emu, bool fdc) {
+    emu->memory.basic_rom_disabled = fdc;
+    emu->memory.overlay_active = fdc;
+    if (emu->card_on[CARD_IDX_loci])
+        emu->loci.dsk_ctrl = fdc ? (uint8_t)(emu->loci.dsk_ctrl & ~0x82)
+                                 : (uint8_t)(emu->loci.dsk_ctrl | 0x82);
+    if (emu->card_on[CARD_IDX_microdisc]) {
+        emu->microdisc.romdis = fdc;
+        emu->microdisc.diskrom = fdc;
+    }
+}
+
+bool __real_loci_rom_swap_cb(void* ctx, const char* rom_path, uint16_t base_addr);
+bool __wrap_loci_rom_swap_cb(void* ctx, const char* rom_path, uint16_t base_addr) {
+    emulator_t* emu = (emulator_t*)ctx;
+    if (!__real_loci_rom_swap_cb(ctx, rom_path, base_addr)) return false;
+    if (base_addr == 0xA000) {             /* LOCI_BOOT_FDC, après $C000 */
+        boot_map(emu, true);
+        return true;
+    }
+    if (base_addr != 0xC000) return true;
+    boot_map(emu, false);
+    uint8_t s = emu->loci.boot_settings;
+    bool b11 = (s & LOCI_BOOT_B11) != 0;
+    if ((s & LOCI_BOOT_TAP) && (s & LOCI_BOOT_TAP_ALD) &&
+        !emu->loci.mnt_mounted[LOCI_MNT_ROM] &&
+        emu->loci.mnt_mounted[LOCI_MNT_TAP] && emu->tape_loaded) {
+        if (b11) {
+            rom_poke(emu, 0xE735, k_synch_11, sizeof k_synch_11);
+            rom_poke(emu, 0xE738, k_ald_setup_11, sizeof k_ald_setup_11);
+            rom_poke(emu, 0xED83, k_ald_jump_11, sizeof k_ald_jump_11);
+        } else {
+            rom_poke(emu, 0xE696, k_synch_10, sizeof k_synch_10);
+            rom_poke(emu, 0xE699, k_ald_setup_10, sizeof k_ald_setup_10);
+            rom_poke(emu, 0xEB3E, k_ald_jump_10, sizeof k_ald_jump_10);
+        }
+        log_info("LOCI boot: tape autoload (CLOAD\"\" at BASIC %s start, port)",
+                 b11 ? "1.1" : "1.0");
+    }
+    cpu_reset(&emu->cpu);                  /* vecteur $FFFC de la ROM BASIC */
+    log_info("LOCI boot: BASIC ROM mapped, reset through $FFFC (port)");
+    return true;
+}
+
 _Static_assert(ORIC_MAX_DRIVES == MICRODISC_MAX_DRIVES, "ORIC_MAX_DRIVES");
 
 /* ── Remplace main() + main_setup_machine/rom_model/tape/disks_speech ──── */
