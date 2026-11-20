@@ -476,6 +476,32 @@ static void rom_poke(emulator_t* emu, uint16_t addr, const uint8_t* p, size_t n)
     memcpy(&emu->memory.rom[addr - 0xC000], p, n);
 }
 
+/* [port] Chargement automatique une seule fois. Les modifications restent
+ * dans la ROM : un démarrage à froid ultérieur (JMP ($FFFC) : fin d'un
+ * programme GRXASM /O de CP/A, ORIC.INC) relançait CLOAD"" sur une cassette
+ * arrivée au bout, et l'Oric attendait sans fin. Le vrai LOCI ferait de même
+ * (tap.c : des zéros en fin de cassette, pas de retour au début) ; le port
+ * s'en écarte : dès que la préparation de CLOAD"" s'exécute, le saut d'origine
+ * de la fin du démarrage à froid est remis, et le démarrage à froid suivant
+ * mène au BASIC (« Ready »), comme sur un Atmos avec un magnétophone. */
+static uint16_t s_ald_setup;              /* $E738 ou $E699 ; 0 : rien à faire */
+static uint16_t s_ald_jump;               /* $ED83 ou $EB3E */
+static const uint8_t* s_ald_patch;        /* saut posé (k_ald_jump_1x) */
+static uint8_t s_ald_orig[3];             /* saut d'origine (JMP vers READY) */
+
+/* Appelée quand le PC atteint s_ald_setup. Seulement si la ROM BASIC
+ * modifiée est visible (pas le menu de LOCI, chargé par le bouton Action,
+ * pas la RAM overlay) ; sinon le saut reste en place pour plus tard. */
+static void ald_once(emulator_t* emu) {
+    uint8_t* jump = &emu->memory.rom[s_ald_jump - 0xC000];
+    if (emu->memory.basic_rom_disabled || !emu->memory.rom_enabled ||
+        memcmp(jump, s_ald_patch, sizeof s_ald_orig) != 0)
+        return;
+    memcpy(jump, s_ald_orig, sizeof s_ald_orig);
+    s_ald_setup = 0;
+    log_info("LOCI boot: CLOAD\"\" started, BASIC cold start restored (port)");
+}
+
 /* ROM BASIC visible ($C000) ou ROM du Microdisc en $E000 sous ROMDIS ($A000),
  * comme le registre $0314 (bit 7 à 1 : pas d'EPROM, bit 1 à 1 : ROM BASIC). */
 static void boot_map(emulator_t* emu, bool fdc) {
@@ -500,6 +526,7 @@ bool __wrap_loci_rom_swap_cb(void* ctx, const char* rom_path, uint16_t base_addr
     }
     if (base_addr != 0xC000) return true;
     boot_map(emu, false);
+    s_ald_setup = 0;                       /* nouvelle ROM : rien d'armé */
     uint8_t s = emu->loci.boot_settings;
     bool b11 = (s & LOCI_BOOT_B11) != 0;
     if ((s & LOCI_BOOT_TAP) && (s & LOCI_BOOT_TAP_ALD) &&
@@ -508,12 +535,18 @@ bool __wrap_loci_rom_swap_cb(void* ctx, const char* rom_path, uint16_t base_addr
         if (b11) {
             rom_poke(emu, 0xE735, k_synch_11, sizeof k_synch_11);
             rom_poke(emu, 0xE738, k_ald_setup_11, sizeof k_ald_setup_11);
-            rom_poke(emu, 0xED83, k_ald_jump_11, sizeof k_ald_jump_11);
+            s_ald_setup = 0xE738;
+            s_ald_jump = 0xED83;
+            s_ald_patch = k_ald_jump_11;
         } else {
             rom_poke(emu, 0xE696, k_synch_10, sizeof k_synch_10);
             rom_poke(emu, 0xE699, k_ald_setup_10, sizeof k_ald_setup_10);
-            rom_poke(emu, 0xEB3E, k_ald_jump_10, sizeof k_ald_jump_10);
+            s_ald_setup = 0xE699;
+            s_ald_jump = 0xEB3E;
+            s_ald_patch = k_ald_jump_10;
         }
+        memcpy(s_ald_orig, &emu->memory.rom[s_ald_jump - 0xC000], sizeof s_ald_orig);
+        rom_poke(emu, s_ald_jump, s_ald_patch, sizeof s_ald_orig);
         log_info("LOCI boot: tape autoload (CLOAD\"\" at BASIC %s start, port)",
                  b11 ? "1.1" : "1.0");
     }
@@ -760,6 +793,10 @@ void oric_machine_run_frame(void) {
          * visible : sous ROMDIS (Microdisc, LOCI), le code de la RAM overlay
          * (CP/A) passant en $E75A était pris pour un CSAVE (point 6 de
          * docs/phosphoric-f8.md). */
+        /* [port] chargement automatique de LOCI une seule fois (ald_once) */
+        if (s_ald_setup && emu->cpu.PC == s_ald_setup)
+            ald_once(emu);
+
         if (!emu->memory.basic_rom_disabled && emu->memory.rom_enabled)
             tape_patches(emu);
 

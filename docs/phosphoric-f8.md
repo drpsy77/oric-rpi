@@ -252,3 +252,16 @@ Contournement dans le port : `__wrap_loci_rom_swap_cb` (`oric_machine.c`,
 `--wrap` dans le `Makefile`) fait les deux à la fois, après la fonction
 d'origine : ROM rendue visible, modifications si une cassette est chargée,
 nouveau `cpu_reset`.
+
+Écart volontaire du port, à ne pas reprendre tel quel : les modifications
+restent dans la ROM, sur le vrai LOCI comme ici. Un démarrage à froid
+ultérieur (`JMP ($FFFC)`, fin d'un programme GRXASM `/O` de CP/A, comme
+`DEMO.TAP` de la vitrine) relance `CLOAD""` sur une cassette arrivée au
+bout : le firmware rend alors des zéros sans revenir au début (`tap.c`,
+`tap_read_byte`), et l'Oric attend sans fin (« Searching .. »). Le port ne
+charge qu'une fois : dès que le PC atteint la préparation de `CLOAD""`
+(`$E738`, `$E699` en 1.0), ROM BASIC visible et saut encore modifié, le
+`JMP $C4A8` d'origine est remis ; le démarrage à froid suivant mène au
+BASIC (« Ready »), comme sur un Atmos avec un magnétophone. Vérifié en natif
+(même logique ajoutée pour l'essai) avec une cassette dont le programme
+finit par `JMP ($FFFC)`. Pour revenir à CP/A : le menu de LOCI.

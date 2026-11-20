@@ -335,7 +335,10 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   VSYNC.COM de CP/A), MIA_BOOT qui laisse la RAM overlay en place (CP/A
   redémarre au lieu du BASIC après `USBMOUNT x.TAP /B`) et ignore le
   chargement automatique de la cassette (point 9, contourné par
-  `__wrap_loci_rom_swap_cb`, octets du firmware de LOCI, 19/11/2026).
+  `__wrap_loci_rom_swap_cb`, octets du firmware de LOCI, 19/11/2026 ;
+  vérifié sur la 3B+ ; chargement une seule fois, `ald_once`, 20/11/2026 :
+  un `JMP ($FFFC)` en fin de programme mène au BASIC, pas à un nouveau
+  `CLOAD""`).
   Les mêmes corrections, en patchs de Phosphoric, sont dans `bureau/`.
 - **Réseau sans retirer la carte, vérifié sur la 3B+ (16/11/2026)** : la Pi
   répond à `oric.local` (10.0.0.23) ; `tftp=cyberlab.local` résolu par mDNS
