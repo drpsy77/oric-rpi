@@ -488,8 +488,14 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    **fait (21/11/2026)**, à essayer sur la 3B+ : `USB:`/`USB2:` dans la
    page web et pour TFTP, liste en texte `/l/<chemin>` (pas de liste par
    TFTP), script `carte.sh`. Plan et essais à faire :
-   `docs/plan-carte-reseau.md`. `carte.sh lire` et `journal` essayés
-   contre l'ancien noyau (tftp-hpa : code de retour vérifié, toujours 0).
+   `docs/plan-carte-reseau.md`. **Vérifié sur la 3B+ (21/11/2026)** :
+   noyau envoyé par TFTP et relu identique, redémarrage par la page web
+   (~10 s) ; `carte.sh ls` (racine avec `USB:/`, `oric/usb`, `USB:/Dsk`,
+   `montee` sur `cpa-en.dsk`), `ls USB2:` → « cle USB absente »,
+   `carte.sh envoyer . kernel8-32.img` → « écrit ». Reste : refus d'une
+   disquette montée par `carte.sh envoyer`, envoi sur une clé, page web
+   des clés dans Dillo. Le `printf` de circle-newlib ne connaît pas `%llu`
+   (`CPage::Printf`, vsnprintf) ; `JournalPrintf` si.
 13. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne

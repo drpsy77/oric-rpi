@@ -673,8 +673,18 @@ THTTPStatus COricWeb::Liste (const char *pDossier, CPage *pPage)
 					  1980 + (e->nDate >> 9), (e->nDate >> 5) & 15,
 					  e->nDate & 31, e->nHeure >> 11, (e->nHeure >> 5) & 63);
 			}
-			pPage->Printf ("f  %10llu  %-16s  %s%s\n", (unsigned long long) e->nTaille,
-				       Date, e->Nom, e->bMonte ? "  montee" : "");
+			// taille en texte : le printf de circle-newlib ne connaît pas %llu
+			char Chiffres[24], *p = Chiffres + sizeof Chiffres;
+			*--p = '\0';
+			unsigned long long n = e->nTaille;
+			do
+			{
+				*--p = '0' + n % 10;
+				n /= 10;
+			}
+			while (n != 0);
+			pPage->Printf ("f  %10s  %-16s  %s%s\n", p, Date, e->Nom,
+				       e->bMonte ? "  montee" : "");
 		}
 		if (bTronque)
 		{
