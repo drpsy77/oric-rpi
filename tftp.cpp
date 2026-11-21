@@ -13,6 +13,9 @@
 // Un fichier est donc lu ou reçu en entier en mémoire (32 Mo au plus,
 // limite de TFTP sans repli du numéro de bloc), puis écrit d'un coup.
 //
+// Noms : chemin de la carte (« oric/usb/x.dsk »), ou d'une clé USB de la
+// Pi (« USB:/dSK/x.dsk », « USB2:/... » ; tftp-hpa prend « USB: » pour un
+// nom de machine sans -l). Pas de liste des dossiers : page web (/l/).
 // Remplacement d'un fichier, disquettes montées, client autorisé : carte.cpp
 // (commun avec la page web). Le dernier bloc est acquitté par Circle avant
 // l'écriture : un échec n'est vu que dans le journal.
@@ -56,10 +59,11 @@ void COricTFTP::Release (void)
 	m_bWriting = false;
 }
 
-// « SD:/ » + nom ; refus des autres volumes et de « .. »
-bool COricTFTP::MakePath (const char *pFileName)
+// « SD:/ » + nom, ou clé USB (« USB:/dSK/x.dsk ») ; refus de « .. » et
+// d'une clé absente (carte.cpp)
+bool COricTFTP::MakePath (const char *pFileName, const TCarteErreur **ppErreur)
 {
-	return CarteChemin (pFileName, m_Path, sizeof m_Path);
+	return CarteChemin (pFileName, m_Path, sizeof m_Path, false, ppErreur);
 }
 
 boolean COricTFTP::IsAccessAllowed (const CIPAddress *pForeignIP,
@@ -74,9 +78,10 @@ boolean COricTFTP::IsAccessAllowed (const CIPAddress *pForeignIP,
 			       (const char *) IP, m_Client.GetNom ());
 		return FALSE;
 	}
-	if (!MakePath (pFileName))
+	const TCarteErreur *pErreur = &CarteNomInvalide;
+	if (!MakePath (pFileName, &pErreur))
 	{
-		JournalPrintf ("TFTP : %s refuse (nom invalide)\n", pFileName);
+		JournalPrintf ("TFTP : %s refuse (%s)\n", pFileName, pErreur->pJournal);
 		return FALSE;
 	}
 	if (bWriteRequest)

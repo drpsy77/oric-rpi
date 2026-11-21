@@ -1,8 +1,9 @@
 //
 // web.h — Page web de la carte SD (web=<port>, avec tftp=<client>)
 //
-// Liste des dossiers de la carte, lecture et envoi de fichiers, état de la
-// machine, redémarrage, depuis un navigateur. Sur CHTTPDaemon de Circle
+// Liste des dossiers de la carte et des clés USB de la Pi, lecture et envoi
+// de fichiers, état de la machine, redémarrage, depuis un navigateur ; liste
+// en texte simple pour un script (/l/, carte.sh). Sur CHTTPDaemon de Circle
 // (lib/net/httpdaemon.cpp, GPL-3.0, voir SOURCES.md) ; même client autorisé
 // et mêmes protections que le serveur TFTP (carte.cpp).
 //
@@ -47,6 +48,7 @@ public:
 
 private:
 	THTTPStatus PageDossier (const char *pDossier, class CPage *pPage);
+	THTTPStatus Liste (const char *pDossier, class CPage *pPage);
 	THTTPStatus Fichier (const char *pNom, u8 *pBuffer, unsigned *pLength,
 			     const char **ppContentType, class CPage *pPage);
 	THTTPStatus Envoi (const char *pDossier, class CPage *pPage);

@@ -120,17 +120,29 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   puis effacé. Disquette montée (Microdisc ou LOCI,
   `oric_machine_disk_mounted`) : lecture permise (pistes en attente
   réécrites avant), remplacement refusé. Nouveau noyau : Ctrl+Alt+Suppr.
-  Client sur la RPI 400 : `tftp -m binary oric.local -c get chemin`, ou
+  Clés USB de la Pi : `USB:/dSK/x.dsk`, `USB2:/...` (`CarteChemin`, clé
+  absente refusée). Client sur la RPI 400 : `sh carte.sh` (voir `web=`), ou
+  `tftp -l -m binary oric.local -c get chemin` (`-l` : sinon `USB:` est pris
+  pour une machine ; un `put` par fichier ; **tftp -c rend toujours 0**, même
+  sur « Error code », et crée le fichier local vide), ou
   `curl --tftp-no-options -T f tftp://oric.local/chemin` (`-o f` pour lire).
-  Chaque transfert dans le journal.
+  Chaque transfert dans le journal ; le dernier bloc est acquitté avant
+  l'écriture (échec vu seulement au journal). Pas de liste par TFTP.
 - `web=80` (avec `tftp=`, même client ; `web=1` = 80) : page web de la
   carte (`web.cpp`, `CHTTPDaemon`, une tâche du cœur 0 par connexion) :
   `http://oric.local/?d=oric/usb` liste (disquettes montées signalées),
   `/f/chemin` lecture, `POST /envoi?d=` envoi multipart (4 Mo en tout :
   CHTTPDaemon garde la requête et la réponse entières en mémoire, tampon de
   4 Mo réservé par connexion), état de la machine, `POST /redemarrer`
-  (Ctrl+Alt+Suppr 1,5 s plus tard). Code de la carte commun avec TFTP :
-  `carte.cpp` (client autorisé, `CarteEcrire` par renommage).
+  (Ctrl+Alt+Suppr 1,5 s plus tard). Clés USB présentes en tête de la
+  racine (`/?d=USB:/dSK`). `/l/chemin` : liste en texte (`d`/`f`, taille
+  exacte, date, `montee`), refus en une ligne `erreur : ...` avec le code
+  200 (CHTTPDaemon remplace le contenu de toute autre réponse par sa page
+  générique : les pages d'erreur du port sont aussi en 200). Code de la
+  carte commun avec TFTP : `carte.cpp` (client autorisé, `CarteChemin`,
+  `CarteEcrire` par renommage). `carte.sh` (RPI 400, `ORIC=oric.local`) :
+  `ls`, `envoyer dossier fichier...` (un `put` par fichier, vérifié par
+  `/l/` : taille et date de l'envoi), `lire`, `journal`.
 - `nom=oric` : mDNS du port (`mdns.cpp`, tâche du cœur 0, avec le réseau) :
   la Pi répond à `oric.local` ; les noms en `.local` (`tftp=`, `getaddrinfo`
   du modem dans `netrelay.cpp`, donc ATDT et `HOSTS` de CP/A) sont cherchés
@@ -194,6 +206,7 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
 | `main.cpp` | copie circle-stdlib |
 | `preparer_circle.sh` | réglages de FatFs dans circle-stdlib (exFAT, noms de volume) |
 | `installer_carte.sh`, `sauvegarde_disquettes.py` | installation sur la carte, sauvegarde des fichiers écrits sur l'Oric |
+| `carte.sh` | carte SD et clés USB de la Pi par le réseau, depuis la RPI 400 (liste, envoi vérifié, lecture, journal) |
 | `Makefile`, `sdcard/`, `README.md`, `SOURCES.md`, `docs/` | |
 | `bureau/` | patchs du port reportés dans Phosphoric (versions Windows et web, `construire.sh`), prêts pour bmarty |
 
@@ -471,11 +484,12 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    en juger : F12 (`perf.txt`, cœur 0 et cœur 1) et « Coeur 0 : trame en
    retard » dans le journal (durées émulation/son/image, MHz, °C, état du
    firmware, rapports du clavier).
-12. **Clés USB et listes par le réseau** (accord de Pierre, 21/11/2026,
-   à faire) : `USB:`/`USB2:` dans la page web et pour TFTP, liste en texte
-   `/l/<chemin>` (pas de liste par TFTP), script `carte.sh` (ls, envoyer
-   un fichier par transfert, lire). Plan complet :
-   `docs/plan-carte-reseau.md`.
+12. **Clés USB et listes par le réseau** (accord de Pierre, 21/11/2026) :
+   **fait (21/11/2026)**, à essayer sur la 3B+ : `USB:`/`USB2:` dans la
+   page web et pour TFTP, liste en texte `/l/<chemin>` (pas de liste par
+   TFTP), script `carte.sh`. Plan et essais à faire :
+   `docs/plan-carte-reseau.md`. `carte.sh lire` et `journal` essayés
+   contre l'ancien noyau (tftp-hpa : code de retour vérifié, toujours 0).
 13. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne

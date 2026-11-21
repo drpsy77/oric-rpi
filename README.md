@@ -142,7 +142,10 @@ curl --tftp-no-options -o journal.txt tftp://$PI/oric/journal.txt
 curl --tftp-no-options -T cpa.dsk tftp://$PI/oric/usb/cpa.dsk
 ```
 
-(ou `tftp -m binary $PI -c put fichier`, paquet `tftp-hpa`).
+(ou `tftp -l -m binary $PI -c put fichier chemin`, paquet `tftp-hpa` : un
+`put` par fichier, et `-l` pour les clés USB, sinon « USB: » est pris pour
+un nom de machine). Les clés USB branchées sur la Pi (`clesusb=`) se
+nomment `USB:/...` et `USB2:/...` : `put x.dsk USB:/dSK/x.dsk`.
 
 Un fichier reçu remplace l'ancien seulement s'il est arrivé en entier
 (écrit à côté, puis renommé) ; le nouveau noyau sert au prochain démarrage
@@ -162,6 +165,25 @@ fichiers dans le dossier affiché (4 Mo en tout par envoi, au-delà TFTP) et
 un bouton Redémarrer (comme Ctrl+Alt+Suppr, après l'envoi d'un noyau).
 Mêmes protections que TFTP (remplacement par renommage, disquette montée
 lisible mais pas remplaçable) ; chaque demande est notée dans le journal.
+Les clés USB branchées sur la Pi apparaissent en tête de la racine
+(`USB:/`, `USB2:/`), avec les mêmes possibilités. `http://oric.local/l/oric/usb`
+donne la liste d'un dossier en texte simple (taille exacte en octets, date),
+pour un script.
+
+`carte.sh` (dans ce dépôt, sur l'ordinateur autorisé) réunit le tout :
+
+```
+sh carte.sh ls oric/usb                          # liste (USB: pour une clé)
+sh carte.sh envoyer oric/usb ../cpa-oric/build/*.dsk
+sh carte.sh envoyer . kernel8-32.img             # puis Ctrl+Alt+Suppr
+sh carte.sh lire USB:/dSK/rogue.dsk
+sh carte.sh journal
+```
+
+Chaque fichier est envoyé par TFTP, puis vérifié dans la liste (taille,
+date de l'envoi) : le serveur TFTP acquitte avant d'écrire, et `tftp -c`
+rend toujours 0, un échec ne se voyant sinon que dans le journal.
+`ORIC=` choisit une autre machine que `oric.local`.
 
 Heure : avec le réseau (modem ou TFTP), la Pi la prend par NTP dès que le Wi-Fi a son adresse
 (`ntp=pool.ntp.org`, nouvel essai toutes les 5 min sans réponse). Les

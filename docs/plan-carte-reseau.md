@@ -1,6 +1,7 @@
 # Plan : clés USB et listes par le réseau (accord de Pierre, 21/11/2026)
 
-À faire dans une nouvelle conversation. Trois parties, accord donné pour
+**Fait le 21/11/2026** (voir « Réalisation » à la fin) ; essais sur la
+3B+ à faire. Trois parties, accord donné pour
 les trois ; **pas de liste par TFTP** (décidé : TFTP ne fait que
 transférer, la liste passe par la page web).
 
@@ -102,3 +103,30 @@ peut s'essayer à part (petit programme C sur la RPI 400). Sur la 3B+
 (Pierre) : `carte.sh ls`, `carte.sh ls USB:/`, envoi des 12 disquettes de
 `cpa-oric/build` dans `oric/usb`, envoi sur une clé, refus d'une disquette
 montée, clé retirée puis liste.
+
+## Réalisation (21/11/2026)
+
+- `CarteChemin` (`carte.cpp`) : préfixe `USB:`/`USB2:` (casse libre, en
+  tête), volume gardé (`USB:/dSK`), clé absente refusée ; raison rendue
+  par `TCarteErreur` (`CarteNomInvalide`, `CarteCleAbsente` : texte du
+  journal sans accent, texte de la page). `CarteRelatif` remplace
+  `SansVolume` (« USB:/ » → « USB: », dont le parent est la racine).
+  `CarteEcrire` refuse aussi une clé retirée entre la demande et
+  l'écriture. Logique essayée à part (petit programme C++ : racine,
+  clé absente, `..`, `:` ailleurs, « USB3: », « USBX/ »).
+- `web.cpp` : `LireDossier` commun à la page et à `/l/` ; clés présentes en
+  tête de la racine. Écart au plan : refus de `/l/` en une ligne
+  `erreur : ...` avec le code **200**, pas 404 : CHTTPDaemon remplace le
+  contenu de toute réponse non 200 par sa page générique (« Not Found »).
+  Pour la même raison, les pages « Refusé » et « Fichier introuvable »
+  (qui rendaient 400 ou 404 et ne s'affichaient donc jamais) sont en 200.
+  Liste tronquée : dernière ligne `# liste arretee a 1000 entrees`.
+- `tftp.cpp` : rien que `CarteChemin` étendu ; raison du refus au journal.
+- `carte.sh` : constaté sur la Pi avec tftp-hpa 5.2 : `tftp -c` rend
+  **toujours 0** (« Error code 1: File not found » compris) et crée ou
+  vide le fichier local ; sans `-l`, « USB:/x » est pris pour la machine
+  « USB ». Donc : `-l`, erreur = toute sortie de tftp, lecture dans un
+  fichier temporaire renommé ensuite. Vérification d'un envoi : taille
+  exacte **et** date ≥ heure de l'envoi moins une minute (les `.dsk` ont
+  souvent la même taille que la version remplacée) ; heure de la Pi pas
+  réglée : « non vérifié ».

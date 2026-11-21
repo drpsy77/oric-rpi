@@ -10,6 +10,20 @@
 //                         téléchargé)
 //   /envoi?d=oric/usb     (POST, multipart) fichiers envoyés dans le dossier
 //   /redemarrer           (POST) comme Ctrl+Alt+Suppr
+//   /l/oric/usb           liste en texte simple, pour un script (carte.sh) :
+//                           d           -  -                 nom/
+//                           f       12345  2026-11-21 10:30  nom[  montee]
+//                         (type, taille exacte en octets, date ; « montee » :
+//                         disquette montée) ; refus : une ligne « erreur : … »
+//
+// Clés USB de la Pi (cles.h) : dossiers « USB: » et « USB2: » en tête de
+// la racine de la carte, quand elles sont branchées ; leurs chemins gardent
+// le volume (/?d=USB:/dSK, /f/USB:/dSK/x.dsk, /l/USB:/). Un nom FAT ne
+// contient pas « : » : pas de conflit avec un vrai dossier.
+//
+// Les pages d'erreur du port (nom invalide, clé absente, fichier introuvable)
+// sont rendues avec le code 200 : CHTTPDaemon remplace le contenu de toute
+// autre réponse par sa page générique (« Not Found »), sans le message.
 //
 // Comme le serveur TFTP : chaque connexion est une tâche de l'ordonnanceur
 // du cœur 0, qui ne touche la carte qu'après WaitIdle (cœur 1 entre deux
@@ -23,6 +37,7 @@
 // TFTP (32 Mo).
 //
 #include "web.h"
+#include "cles.h"
 #include "journal.h"
 #include "oric_machine.h"
 
@@ -211,12 +226,6 @@ static bool Parametre (const char *pParams, const char *pNom, char *pDest, unsig
 	return true;
 }
 
-// « SD:/oric/usb » → « oric/usb »
-static const char *SansVolume (const char *pChemin)
-{
-	return pChemin + 4;
-}
-
 // ── Connexions ───────────────────────────────────────────────────────────
 
 COricWeb::COricWeb (CNetSubSystem *pNetSubSystem, u16 nPort, const char *pClient,
@@ -328,6 +337,17 @@ THTTPStatus COricWeb::GetContent (const char *pPath, const char *pParams,
 			return HTTPOK;		// fichier : *pLength déjà rempli
 		}
 	}
+	else if (strcmp (pPath, "/l") == 0 || strncmp (pPath, "/l/", 3) == 0)
+	{
+		char Nom[CARTE_MAX_CHEMIN];
+		const char *pNom = pPath[2] == '/' ? pPath + 3 : "";
+		if (!Decode (pNom, strlen (pNom), Nom, sizeof Nom, false))
+		{
+			return HTTPBadRequest;
+		}
+		*ppContentType = "text/plain; charset=utf-8";
+		Status = Liste (Nom, &Page);
+	}
 	else if (strcmp (pPath, "/envoi") == 0)
 	{
 		Status = Envoi (Dossier, &Page);
@@ -366,6 +386,68 @@ static int Compare (const void *p1, const void *p2)
 	return strcasecmp (e1->Nom, e2->Nom);
 }
 
+// Entrées de pChemin (chemin de FatFs, CarteChemin), triées : dossiers puis
+// fichiers. À la racine de la carte, les clés USB présentes d'abord.
+// Touche la carte : après WaitIdle, sans rendre la main.
+static FRESULT LireDossier (const char *pChemin, TEntree *pEntrees, unsigned *pnEntrees,
+			    bool *pbTronque)
+{
+	unsigned nEntrees = 0;
+	*pbTronque = false;
+
+	unsigned nCles = 0;
+	if (strcmp (pChemin, "SD:/") == 0)
+	{
+		for (unsigned i = 0; i < CLES_MAX; i++)
+		{
+			unsigned nSerie, nBranchement;
+			if (cles_usb_etat (ClesUSBVolume (i), &nSerie, &nBranchement) == 1)
+			{
+				TEntree *e = &pEntrees[nCles++];
+				memset (e, 0, sizeof *e);
+				snprintf (e->Nom, sizeof e->Nom, "%s", ClesUSBVolume (i));
+				e->bDossier = true;
+			}
+		}
+		nEntrees = nCles;
+	}
+
+	DIR Dir;
+	FRESULT Res = f_opendir (&Dir, pChemin);
+	if (Res == FR_OK)
+	{
+		bool bFinVolume = pChemin[strlen (pChemin) - 1] == '/';	// « SD:/ »
+		FILINFO Info;
+		while (f_readdir (&Dir, &Info) == FR_OK && Info.fname[0] != '\0')
+		{
+			if (nEntrees == MAX_ENTREES)
+			{
+				*pbTronque = true;
+				break;
+			}
+			TEntree *e = &pEntrees[nEntrees++];
+			memcpy (e->Nom, Info.fname, sizeof e->Nom);	// même taille
+			e->Nom[sizeof e->Nom - 1] = '\0';
+			e->nTaille = Info.fsize;
+			e->nDate = Info.fdate;
+			e->nHeure = Info.ftime;
+			e->bDossier = (Info.fattrib & AM_DIR) != 0;
+			e->bMonte = false;
+			if (!e->bDossier)
+			{
+				char Complet[CARTE_MAX_CHEMIN + FF_MAX_LFN + 2];
+				snprintf (Complet, sizeof Complet, "%s%s%s", pChemin,
+					  bFinVolume ? "" : "/", e->Nom);
+				e->bMonte = oric_machine_disk_mounted (Complet);
+			}
+		}
+		f_closedir (&Dir);
+	}
+	qsort (pEntrees + nCles, nEntrees - nCles, sizeof (TEntree), Compare);
+	*pnEntrees = nEntrees;
+	return Res;
+}
+
 static void Taille (CPage *pPage, FSIZE_t n)
 {
 	if (n < 10000)
@@ -385,12 +467,17 @@ static void Taille (CPage *pPage, FSIZE_t n)
 THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 {
 	char Chemin[CARTE_MAX_CHEMIN];
-	if (!CarteChemin (pDossier, Chemin, sizeof Chemin, true))
+	const TCarteErreur *pErreur = &CarteNomInvalide;
+	if (!CarteChemin (pDossier, Chemin, sizeof Chemin, true, &pErreur))
 	{
-		Message (pPage, "Nom invalide", pDossier, 0);
-		return HTTPBadRequest;
+		char Texte[CARTE_MAX_CHEMIN + 40];
+		snprintf (Texte, sizeof Texte, "%s : %s", pDossier, pErreur->pTexte);
+		Message (pPage, "Refusé", Texte, 0);
+		return HTTPOK;
 	}
-	const char *pRel = SansVolume (Chemin);		// « oric/usb », « » pour la racine
+	char Relatif[CARTE_MAX_CHEMIN];
+	CarteRelatif (Chemin, Relatif, sizeof Relatif);
+	const char *pRel = Relatif;		// « oric/usb », « USB:/dSK », « » à la racine
 
 	TEntree *pEntrees = (TEntree *) malloc (MAX_ENTREES * sizeof (TEntree));
 	if (pEntrees == 0)
@@ -400,39 +487,9 @@ THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 
 	// Carte : entre deux trames, sans rendre la main
 	(*m_pHooks->WaitIdle) ();
-	unsigned nEntrees = 0;
-	bool bTronque = false;
-	DIR Dir;
-	FRESULT Res = f_opendir (&Dir, Chemin);
-	if (Res == FR_OK)
-	{
-		FILINFO Info;
-		while (f_readdir (&Dir, &Info) == FR_OK && Info.fname[0] != '\0')
-		{
-			if (nEntrees == MAX_ENTREES)
-			{
-				bTronque = true;
-				break;
-			}
-			TEntree *e = &pEntrees[nEntrees++];
-			memcpy (e->Nom, Info.fname, sizeof e->Nom);	// même taille
-			e->Nom[sizeof e->Nom - 1] = '\0';
-			e->nTaille = Info.fsize;
-			e->nDate = Info.fdate;
-			e->nHeure = Info.ftime;
-			e->bDossier = (Info.fattrib & AM_DIR) != 0;
-			e->bMonte = false;
-			if (!e->bDossier)
-			{
-				char Complet[CARTE_MAX_CHEMIN + FF_MAX_LFN + 2];
-				snprintf (Complet, sizeof Complet, "%s/%s",
-					  *pRel != '\0' ? Chemin : "SD:", e->Nom);
-				e->bMonte = oric_machine_disk_mounted (Complet);
-			}
-		}
-		f_closedir (&Dir);
-	}
-	qsort (pEntrees, nEntrees, sizeof (TEntree), Compare);
+	unsigned nEntrees;
+	bool bTronque;
+	FRESULT Res = LireDossier (Chemin, pEntrees, &nEntrees, &bTronque);
 
 	CString Etat;
 	(*m_pHooks->Status) (&Etat);
@@ -450,7 +507,7 @@ THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 		      "<button>Redémarrer</button> <span class=\"doux\">"
 		      "comme Ctrl+Alt+Suppr (après l'envoi d'un noyau)</span></form></section>");
 
-	// Fil d'Ariane : carte / oric / usb
+	// Fil d'Ariane : carte / oric / usb, carte / USB: / dSK
 	pPage->Texte ("<section><h2><a href=\"/?d=\">carte</a>");
 	{
 		char Partiel[CARTE_MAX_CHEMIN];
@@ -487,7 +544,7 @@ THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 			      "<th>Modifié</th></tr>");
 		if (*pRel != '\0')
 		{
-			// dossier parent
+			// dossier parent (« USB:/dSK » → « USB: » → racine de la carte)
 			char Parent[CARTE_MAX_CHEMIN];
 			snprintf (Parent, sizeof Parent, "%s", pRel);
 			char *pSlash = strrchr (Parent, '/');
@@ -562,6 +619,73 @@ THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 	return HTTPOK;
 }
 
+// ── Liste en texte simple (/l/), pour un script ──────────────────────────
+//
+// Une ligne par entrée, colonnes fixes (nom à partir de la 34ᵉ, tant que la
+// taille tient en 10 chiffres) :
+//   d           -  -                 nom/
+//   f       12345  2026-11-21 10:30  nom
+//   f      125440  2026-11-21 10:30  cpa.dsk  montee
+// Date « - » si FatFs n'en a pas. À la racine de la carte, « USB:/ » et
+// « USB2:/ » (clés présentes) d'abord. Refus : une seule ligne « erreur : … »
+// (code 200, voir en tête) ; liste trop longue : « # liste arretee... » à
+// la fin. Textes sans accent, comme le journal.
+
+THTTPStatus COricWeb::Liste (const char *pDossier, CPage *pPage)
+{
+	char Chemin[CARTE_MAX_CHEMIN];
+	const TCarteErreur *pErreur = &CarteNomInvalide;
+	if (!CarteChemin (pDossier, Chemin, sizeof Chemin, true, &pErreur))
+	{
+		pPage->Printf ("erreur : %s\n", pErreur->pJournal);
+		return HTTPOK;
+	}
+
+	TEntree *pEntrees = (TEntree *) malloc (MAX_ENTREES * sizeof (TEntree));
+	if (pEntrees == 0)
+	{
+		pPage->Texte ("erreur : memoire pleine\n");
+		return HTTPOK;
+	}
+
+	(*m_pHooks->WaitIdle) ();
+	unsigned nEntrees;
+	bool bTronque;
+	FRESULT Res = LireDossier (Chemin, pEntrees, &nEntrees, &bTronque);
+	if (Res != FR_OK)
+	{
+		pPage->Printf ("erreur : dossier introuvable\n");
+	}
+	else
+	{
+		for (unsigned i = 0; i < nEntrees; i++)
+		{
+			const TEntree *e = &pEntrees[i];
+			if (e->bDossier)
+			{
+				pPage->Printf ("d  %10s  %-16s  %s/\n", "-", "-", e->Nom);
+				continue;
+			}
+			char Date[20] = "-";
+			if (e->nDate != 0)
+			{
+				snprintf (Date, sizeof Date, "%04u-%02u-%02u %02u:%02u",
+					  1980 + (e->nDate >> 9), (e->nDate >> 5) & 15,
+					  e->nDate & 31, e->nHeure >> 11, (e->nHeure >> 5) & 63);
+			}
+			pPage->Printf ("f  %10llu  %-16s  %s%s\n", (unsigned long long) e->nTaille,
+				       Date, e->Nom, e->bMonte ? "  montee" : "");
+		}
+		if (bTronque)
+		{
+			pPage->Printf ("# liste arretee a %u entrees\n", MAX_ENTREES);
+		}
+	}
+
+	free (pEntrees);
+	return HTTPOK;
+}
+
 // ── Lecture d'un fichier ─────────────────────────────────────────────────
 
 static const char *TypeContenu (const char *pNom)
@@ -581,16 +705,23 @@ THTTPStatus COricWeb::Fichier (const char *pNom, u8 *pBuffer, unsigned *pLength,
 			       const char **ppContentType, CPage *pPage)
 {
 	char Chemin[CARTE_MAX_CHEMIN];
-	if (!CarteChemin (pNom, Chemin, sizeof Chemin))
+	const TCarteErreur *pErreur = &CarteNomInvalide;
+	if (!CarteChemin (pNom, Chemin, sizeof Chemin, true, &pErreur))
 	{
-		Message (pPage, "Nom invalide", pNom, 0);
-		return HTTPBadRequest;
+		char Texte[CARTE_MAX_CHEMIN + 40];
+		snprintf (Texte, sizeof Texte, "%s : %s", pNom, pErreur->pTexte);
+		Message (pPage, "Refusé", Texte, 0);
+		return HTTPOK;
 	}
+	char Relatif[CARTE_MAX_CHEMIN];
+	CarteRelatif (Chemin, Relatif, sizeof Relatif);
 
-	// Dossier sous /f/ : sa liste
+	// Dossier sous /f/ (racine d'un volume comprise) : sa liste
 	(*m_pHooks->WaitIdle) ();
 	FILINFO Info;
-	if (f_stat (Chemin, &Info) == FR_OK && (Info.fattrib & AM_DIR))
+	size_t nChemin = strlen (Chemin);
+	if (   Chemin[nChemin - 1] == '/'
+	    || (f_stat (Chemin, &Info) == FR_OK && (Info.fattrib & AM_DIR)))
 	{
 		return PageDossier (pNom, pPage);
 	}
@@ -599,18 +730,18 @@ THTTPStatus COricWeb::Fichier (const char *pNom, u8 *pBuffer, unsigned *pLength,
 	if (!CarteLireDans (Chemin, pBuffer, &nTaille))
 	{
 		char Dossier[CARTE_MAX_CHEMIN];
-		snprintf (Dossier, sizeof Dossier, "%s", SansVolume (Chemin));
+		snprintf (Dossier, sizeof Dossier, "%s", Relatif);
 		char *pSlash = strrchr (Dossier, '/');
 		*(pSlash != 0 ? pSlash : Dossier) = '\0';
 		if (nTaille == 0)
 		{
-			Message (pPage, "Fichier introuvable", SansVolume (Chemin), Dossier);
-			return HTTPNotFound;
+			Message (pPage, "Fichier introuvable", Relatif, Dossier);
+			return HTTPOK;
 		}
 		char Texte[CARTE_MAX_CHEMIN + 100];
 		snprintf (Texte, sizeof Texte,
 			  "%s : %u octets, la page web en lit %u au plus. Passer par TFTP.",
-			  SansVolume (Chemin), nTaille, *pLength);
+			  Relatif, nTaille, *pLength);
 		Message (pPage, "Fichier trop gros", Texte, Dossier);
 		return HTTPOK;
 	}
@@ -624,12 +755,17 @@ THTTPStatus COricWeb::Fichier (const char *pNom, u8 *pBuffer, unsigned *pLength,
 THTTPStatus COricWeb::Envoi (const char *pDossier, CPage *pPage)
 {
 	char Dossier[CARTE_MAX_CHEMIN];
-	if (!CarteChemin (pDossier, Dossier, sizeof Dossier, true))
+	const TCarteErreur *pErreur = &CarteNomInvalide;
+	if (!CarteChemin (pDossier, Dossier, sizeof Dossier, true, &pErreur))
 	{
-		Message (pPage, "Nom invalide", pDossier, 0);
-		return HTTPBadRequest;
+		char Texte[CARTE_MAX_CHEMIN + 40];
+		snprintf (Texte, sizeof Texte, "%s : %s", pDossier, pErreur->pTexte);
+		Message (pPage, "Refusé", Texte, 0);
+		return HTTPOK;
 	}
-	const char *pRel = SansVolume (Dossier);
+	char Relatif[CARTE_MAX_CHEMIN];
+	CarteRelatif (Dossier, Relatif, sizeof Relatif);
+	const char *pRel = Relatif;
 
 	Debut (pPage, "Envoi");
 	pPage->Texte ("<h1>Envoi</h1><section><table>");
@@ -665,15 +801,16 @@ THTTPStatus COricWeb::Envoi (const char *pDossier, CPage *pPage)
 		}
 
 		nFichiers++;
-		char Relatif[CARTE_MAX_CHEMIN], Chemin[CARTE_MAX_CHEMIN];
-		int nRel = snprintf (Relatif, sizeof Relatif, "%s%s%s", pRel,
+		char Fichier[CARTE_MAX_CHEMIN], Chemin[CARTE_MAX_CHEMIN];
+		int nRel = snprintf (Fichier, sizeof Fichier, "%s%s%s", pRel,
 				     *pRel != '\0' ? "/" : "", pBase);
 		char Resultat[120];
-		if (   *pBase == '\0' || nRel < 0 || (unsigned) nRel >= sizeof Relatif
-		    || !CarteChemin (Relatif, Chemin, sizeof Chemin))
+		pErreur = &CarteNomInvalide;
+		if (   *pBase == '\0' || nRel < 0 || (unsigned) nRel >= sizeof Fichier
+		    || !CarteChemin (Fichier, Chemin, sizeof Chemin, false, &pErreur))
 		{
-			snprintf (Resultat, sizeof Resultat, "refusé (nom invalide)");
-			JournalPrintf ("Web : %s refuse (nom invalide)\n", Relatif);
+			snprintf (Resultat, sizeof Resultat, "refusé (%s)", pErreur->pTexte);
+			JournalPrintf ("Web : %s refuse (%s)\n", Fichier, pErreur->pJournal);
 		}
 		else
 		{

@@ -9,11 +9,15 @@
 // laisse au pire l'un des deux à côté, jamais un fichier à moitié écrit
 // (kernel8-32.img compris).
 //
+// Noms : carte SD (« SD:/ ») ou clés USB de la Pi (« USB: », « USB2: »,
+// cles.h) ; une clé absente est refusée avant FatFs (CarteChemin).
+//
 // Une disquette montée (Microdisc ou LOCI) ne peut pas être remplacée :
 // l'Oric la garde en mémoire et la réécrirait par-dessus. Elle peut être
 // lue : les pistes en attente sont d'abord réécrites (disquette.c).
 //
 #include "carte.h"
+#include "cles.h"
 #include "mdns.h"
 #include "journal.h"
 #include "oric_machine.h"
@@ -23,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 CClientAutorise::CClientAutorise (CNetSubSystem *pNet, const char *pNom,
 				  const char *pService)
@@ -53,30 +58,83 @@ bool CClientAutorise::Accepte (const CIPAddress &rIP)
 	return m_Adresse.IsSet () && rIP == m_Adresse;
 }
 
-bool CarteChemin (const char *pNom, char *pChemin, unsigned nTaille, bool bDossier)
+const TCarteErreur CarteNomInvalide = { "nom invalide", "nom invalide" };
+const TCarteErreur CarteCleAbsente  = { "cle USB absente", "clé USB absente" };
+
+static bool Refus (const TCarteErreur *pErreur, const TCarteErreur **ppErreur)
+{
+	if (ppErreur != 0)
+	{
+		*ppErreur = pErreur;
+	}
+	return false;
+}
+
+bool CarteChemin (const char *pNom, char *pChemin, unsigned nTaille, bool bDossier,
+		  const TCarteErreur **ppErreur)
 {
 	while (*pNom == '/')
 	{
 		pNom++;
 	}
+
+	// Clé USB : « USB: » ou « USB2: » en tête
+	const char *pVolume = "SD:";
+	for (unsigned i = 0; i < CLES_MAX; i++)
+	{
+		const char *pCle = ClesUSBVolume (i);
+		size_t n = strlen (pCle);
+		if (strncasecmp (pNom, pCle, n) == 0)
+		{
+			unsigned nSerie, nBranchement;
+			if (cles_usb_etat (pCle, &nSerie, &nBranchement) != 1)
+			{
+				return Refus (&CarteCleAbsente, ppErreur);
+			}
+			pVolume = pCle;
+			pNom += n;
+			while (*pNom == '/')
+			{
+				pNom++;
+			}
+			break;
+		}
+	}
+
 	if (   (*pNom == '\0' && !bDossier)
 	    || strchr (pNom, ':') != 0
 	    || strstr (pNom, "..") != 0
 	    || strchr (pNom, '\\') != 0)
 	{
-		return false;
+		return Refus (&CarteNomInvalide, ppErreur);
 	}
-	int n = snprintf (pChemin, nTaille, "SD:/%s", pNom);
+	int n = snprintf (pChemin, nTaille, "%s/%s", pVolume, pNom);
 	if (n < 0 || (unsigned) n >= nTaille)
 	{
-		return false;
+		return Refus (&CarteNomInvalide, ppErreur);
 	}
-	// dossier : sans « / » final (sauf « SD:/ »)
-	while (n > 4 && pChemin[n - 1] == '/')
+	// dossier : sans « / » final (sauf la racine, « SD:/ »)
+	int nRacine = strlen (pVolume) + 1;
+	while (n > nRacine && pChemin[n - 1] == '/')
 	{
 		pChemin[--n] = '\0';
 	}
 	return true;
+}
+
+void CarteRelatif (const char *pChemin, char *pRelatif, unsigned nTaille)
+{
+	if (strncmp (pChemin, "SD:/", 4) == 0)
+	{
+		snprintf (pRelatif, nTaille, "%s", pChemin + 4);
+		return;
+	}
+	snprintf (pRelatif, nTaille, "%s", pChemin);
+	size_t n = strlen (pRelatif);
+	if (n >= 2 && pRelatif[n - 1] == '/' && pRelatif[n - 2] == ':')
+	{
+		pRelatif[n - 1] = '\0';		// « USB:/ » → « USB: »
+	}
 }
 
 bool CarteLire (const char *pChemin, u8 **ppDonnees, unsigned *pTaille, unsigned nMax)
@@ -158,6 +216,12 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 	if (oric_machine_disk_mounted (pChemin))
 	{
 		return Echec (pService, pChemin, "disquette montee", "disquette montée", pMessage, nMessage);
+	}
+	unsigned nSerie, nBranchement;
+	if (cles_usb_etat (pChemin, &nSerie, &nBranchement) == 0)	// retirée entre-temps
+	{
+		return Echec (pService, pChemin, CarteCleAbsente.pJournal, CarteCleAbsente.pTexte,
+			      pMessage, nMessage);
 	}
 
 	char New[CARTE_MAX_CHEMIN + 10], Old[CARTE_MAX_CHEMIN + 10];

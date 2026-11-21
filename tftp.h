@@ -2,7 +2,8 @@
 // tftp.h — Serveur TFTP de la carte SD (tftp=<client : adresse ou nom>)
 //
 // Mise à jour du noyau, des disquettes, lecture du journal sans retirer la
-// carte. Sur CTFTPDaemon de Circle (lib/net/tftpdaemon.cpp, GPL-3.0, voir
+// carte ; clés USB de la Pi aussi (« USB:/dSK/x.dsk », client en mode
+// littéral : tftp -l). Sur CTFTPDaemon de Circle (lib/net/tftpdaemon.cpp, GPL-3.0, voir
 // SOURCES.md), comme addon/tftpfileserver ; écrit pour le port : fichiers
 // gardés en mémoire pendant le transfert, carte SD touchée seulement quand
 // l'émulation est entre deux trames, remplacement d'un fichier sans le
@@ -41,7 +42,7 @@ public:
 	void UpdateStatus (TStatus Status, const char *pFileName);
 
 private:
-	bool MakePath (const char *pFileName);
+	bool MakePath (const char *pFileName, const TCarteErreur **ppErreur = 0);
 	void Release (void);
 
 private:

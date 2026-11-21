@@ -66,8 +66,8 @@ captures AVI/images, traces/profilage, CLI, hostfs, fast-load et auto-frappe.
 | `journal.cpp`, `journal.h` | Journal de Phosphoric dans `oric/journal.txt`, en mémoire puis écrit par le cœur 0 | Écrit pour le port |
 | `netrelay.cpp`, `netrelay.h` | Sockets et fermetures de fichiers de l'émulation (cœur 1) exécutés par le cœur 0 (`--wrap` de l'éditeur de liens) | Écrit pour le port |
 | `tftp.cpp`, `tftp.h` | Serveur TFTP de la carte SD (`tftp=`) : fichiers en mémoire, carte touchée entre deux trames, remplacement par renommage, disquettes montées protégées | Écrit pour le port, sur `CTFTPDaemon` de Circle (`lib/net/tftpdaemon.cpp`) ; appels de FatFs comme Circle `addon/tftpfileserver/tftpfatfsfileserver.cpp` |
-| `carte.cpp`, `carte.h` | Accès à la carte depuis le réseau, commun à TFTP et à la page web : client autorisé, noms, lecture, remplacement par renommage, disquettes montées protégées | Écrit pour le port (repris de `tftp.cpp`) |
-| `web.cpp`, `web.h` | Page web de la carte SD (`web=`) : liste, lecture, envoi, état, redémarrage | Écrit pour le port, sur `CHTTPDaemon` de Circle (`lib/net/httpdaemon.cpp`), dérivé comme Circle `sample/21-webserver` |
+| `carte.cpp`, `carte.h` | Accès à la carte (et aux clés USB de la Pi, `USB:`/`USB2:`) depuis le réseau, commun à TFTP et à la page web : client autorisé, noms, lecture, remplacement par renommage, disquettes montées protégées | Écrit pour le port (repris de `tftp.cpp`) |
+| `web.cpp`, `web.h` | Page web de la carte SD (`web=`) : liste (clés USB comprises), liste en texte pour un script (`/l/`), lecture, envoi, état, redémarrage | Écrit pour le port, sur `CHTTPDaemon` de Circle (`lib/net/httpdaemon.cpp`), dérivé comme Circle `sample/21-webserver` |
 | `cles.cpp`, `cles.h` | Clés USB de la Pi servies par LOCI : volumes `USB:`/`USB2:` montés au branchement, démontés au retrait ; `statvfs` des volumes FatFs | Écrit pour le port (FatFs et diskio de Circle `addon/fatfs`) |
 | `mdns.cpp`, `mdns.h` | mDNS : réponse pour `nom.local`, recherche des noms en `.local` (TFTP, modem) | Écrit pour le port (RFC 1035 et 6762) ; ouverture de la socket comme Circle `lib/net/mdnsdaemon.cpp` |
 | `main.cpp` | Point d'entrée | **Copie à l'identique** de circle-stdlib `samples/03-stdio-fatfs/main.cpp` |
@@ -76,6 +76,7 @@ captures AVI/images, traces/profilage, CLI, hostfs, fast-load et auto-frappe.
 | `Makefile` | Construction de `kernel.img` | Repris de circle-stdlib `samples/03-stdio-fatfs/Makefile` |
 | `sdcard/cmdline.txt`, `sdcard/config.txt`, `sdcard/oric.cfg`, `sdcard/wpa_supplicant.conf` | Options de démarrage, modèle de configuration Wi-Fi | Écrits pour le port (options Circle documentées dans `doc/cmdline.txt` de Circle) |
 | `importer_phosphoric.sh` | Copie des fichiers de Phosphoric depuis un clone | Écrit pour le port |
+| `carte.sh` | Carte SD et clés USB de la Pi depuis la RPI 400 : liste, envoi vérifié, lecture, journal (curl, tftp-hpa) | Écrit pour le port |
 
 Versions validées : circle-stdlib `4fbab62` (2026-09-25), Circle `7a81e1b`
 (Step51.1.1), avec `arm-none-eabi-gcc` 12.2.1. circle-stdlib configuré

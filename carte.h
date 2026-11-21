@@ -16,7 +16,7 @@
 #include <circle/net/ipaddress.h>
 #include <circle/types.h>
 
-#define CARTE_MAX_CHEMIN	300		// « SD:/ » + nom
+#define CARTE_MAX_CHEMIN	300		// « SD:/ » ou « USB2:/ » + nom
 
 // Seul client autorisé : adresse ou nom (cyberlab.local par mDNS, sinon DNS
 // de la box), résolu à nouveau si une autre adresse se présente (bail DHCP
@@ -37,9 +37,27 @@ private:
 	CIPAddress m_Adresse;			// sa dernière adresse connue
 };
 
-// « SD:/ » + nom (sans « / » au début) ; refus des autres volumes, de « .. »
-// et de « \ ». Nom vide permis seulement si bDossier (racine).
-bool CarteChemin (const char *pNom, char *pChemin, unsigned nTaille, bool bDossier = false);
+// Chemin de FatFs d'un nom reçu du réseau (« / » au début sans effet) :
+//   « oric/usb/x.dsk »  → « SD:/oric/usb/x.dsk » (carte SD)
+//   « USB:/dSK/x.dsk »  → « USB:/dSK/x.dsk » (clé USB, cles.h : « USB: » ou
+//                         « USB2: », casse libre, en tête seulement)
+// Refus de « : » ailleurs, de « .. » et de « \ », et d'une clé absente.
+// Nom vide (ou volume seul) permis seulement si bDossier (racine). Dossier :
+// sans « / » final, sauf la racine (« SD:/ », « USB:/ »). Refus : raison
+// dans *ppErreur, si ppErreur (CarteNomInvalide, CarteCleAbsente).
+struct TCarteErreur
+{
+	const char *pJournal;		// sans accent
+	const char *pTexte;		// pour la page web
+};
+extern const TCarteErreur CarteNomInvalide, CarteCleAbsente;
+
+bool CarteChemin (const char *pNom, char *pChemin, unsigned nTaille, bool bDossier = false,
+		  const TCarteErreur **ppErreur = 0);
+
+// Chemin pour la page web : « SD:/oric/usb » → « oric/usb » (carte, « » à la
+// racine) ; « USB:/dSK » → « USB:/dSK », « USB:/ » → « USB: » (clé)
+void CarteRelatif (const char *pChemin, char *pRelatif, unsigned nTaille);
 
 // Fichier entier en mémoire (malloc, à libérer par free) ; pistes en attente
 // réécrites avant si c'est une disquette montée. Faux si absent, illisible
