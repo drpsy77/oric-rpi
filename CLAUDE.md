@@ -471,7 +471,12 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    en juger : F12 (`perf.txt`, cœur 0 et cœur 1) et « Coeur 0 : trame en
    retard » dans le journal (durées émulation/son/image, MHz, °C, état du
    firmware, rapports du clavier).
-12. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
+12. **Clés USB et listes par le réseau** (accord de Pierre, 21/11/2026,
+   à faire) : `USB:`/`USB2:` dans la page web et pour TFTP, liste en texte
+   `/l/<chemin>` (pas de liste par TFTP), script `carte.sh` (ls, envoyer
+   un fichier par transfert, lire). Plan complet :
+   `docs/plan-carte-reseau.md`.
+13. Idées, par intérêt : manette USB → joystick IJK (déjà émulé par Phosphoric,
    `CUSBGamePad` de Circle) ; son sur la prise jack (`CPWMSoundDevice`,
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
    l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`
