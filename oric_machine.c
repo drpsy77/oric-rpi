@@ -363,7 +363,21 @@ void __wrap_acia_write(acia6551_t* acia, uint16_t addr, uint8_t value) {
 }
 
 /* ── Instance unique de la machine (main() : « emulator_t emu; ») ─────── */
-static emulator_t s_emu;                   /* ~2,7 Mo : hors pile */
+/* [port] ~2,6 Mo réservés dans le tas, pas dans la BSS : le noyau entier
+ * (BSS comprise) doit tenir dans KERNEL_MAX_SIZE (limite.ld). Réservée à la
+ * première utilisation : les serveurs du cœur 0 (TFTP, page web) peuvent
+ * demander si une disquette est montée avant oric_machine_init. Le cœur 1
+ * ne s'en sert qu'après l'initialisation (pas de concurrence ici). */
+static emulator_t* s_pemu;
+
+static emulator_t* oric_emu(void) {
+    if (s_pemu == NULL) {
+        s_pemu = (emulator_t*)calloc(1, sizeof(emulator_t));
+        if (s_pemu == NULL) abort();       /* tas de Circle : ~1 Go, n'arrive pas */
+    }
+    return s_pemu;
+}
+#define s_emu (*oric_emu())
 
 /* ── [port] +++ du modem reconnu comme par un modem Hayes (ajout du port) ─ */
 /* Le picowifi de Phosphoric (picowifi_send) ne prend un « + » pour
