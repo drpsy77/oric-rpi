@@ -545,6 +545,8 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    (`GetMultipartFormPart` de Circle, cœur 0). Restent les essais de
    Pierre (son, CP/A, clé retirée, Ctrl+Alt+Suppr pendant un envoi) et
    `oric/loci/montee.dsk` à effacer : `docs/plan-coeur2-carte.md`.
-   Ensuite : serveur **WebDAV** (`dav://oric.local/` dans PCManFM par
+   Ensuite : serveur **WebDAV** (`dav://oric.local:81/` dans PCManFM par
    gvfs, `davfs2` pour un point de montage ; effacer, renommer, dossiers),
-   préféré à 9P, NFS et SMB.
+   préféré à 9P, NFS et SMB. Plan : `docs/plan-webdav.md` (décisions à
+   prendre par Pierre au début ; étape 0 : `s_emu` par `calloc`, le noyau
+   n'ayant plus que ~39 Ko de marge sous `KERNEL_MAX_SIZE`).
