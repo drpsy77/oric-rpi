@@ -721,6 +721,10 @@ bool oric_machine_disk_mounted(const char* path) {
     return disquette_montee(&s_emu, path);
 }
 
+bool oric_machine_disk_mounted_under(const char* dir) {
+    return disquette_montee_sous(&s_emu, dir);
+}
+
 void oric_machine_flush_disks(void) {
     disquette_flush_attente(&s_emu);
 }

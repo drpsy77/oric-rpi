@@ -108,6 +108,7 @@ private:
 	class COricTFTP *m_pTFTP;
 	class COricMDNS *m_pMDNS;			// nom.local, noms en .local
 	class COricWeb *m_pWeb;				// page web de la carte (web=)
+	class COricDAV *m_pDAV;				// serveur WebDAV de la carte (dav=)
 
 	// Heure : NTP dès que le réseau est prêt (ntp=), fuseau de fuseau= appliqué
 	// à l'horloge de Circle (dates des fichiers de la carte SD)

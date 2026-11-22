@@ -1,0 +1,2 @@
+#define MAX_TASKS 20
+#define TASK_STACK_SIZE 0x8000

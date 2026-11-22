@@ -1,5 +1,5 @@
 //
-// carte.cpp — Accès à la carte SD depuis le réseau (TFTP, page web)
+// carte.cpp — Accès à la carte SD depuis le réseau (TFTP, page web, WebDAV)
 //
 // Écrit pour le port (repris de tftp.cpp, qui suivait Circle
 // addon/tftpfileserver pour les appels de FatFs). Voir carte.h.
@@ -530,12 +530,13 @@ static bool Echec (const char *pService, const char *pChemin, const char *pRaiso
 // Disquette montée ou clé retirée (ou remise : nBranchement a changé) ?
 // Entre deux trames.
 static bool Refuse (const char *pChemin, bool bCle, unsigned nBranchement,
-		    const char **ppRaison, const char **ppTexte)
+		    const char **ppRaison, const char **ppTexte, TCarteCode *pCode)
 {
 	if (oric_machine_disk_mounted (pChemin))
 	{
 		*ppRaison = "disquette montee";
 		*ppTexte = "disquette montée";
+		*pCode = CarteMontee;
 		return true;
 	}
 	unsigned nSerie, nBranchementActuel;
@@ -544,14 +545,23 @@ static bool Refuse (const char *pChemin, bool bCle, unsigned nBranchement,
 	{
 		*ppRaison = CarteCleAbsente.pJournal;
 		*ppTexte = CarteCleAbsente.pTexte;
+		*pCode = CarteCle;
 		return true;
 	}
 	return false;
 }
 
 bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
-		  const char *pService, char *pMessage, unsigned nMessage)
+		  const char *pService, char *pMessage, unsigned nMessage,
+		  TCarteCode *pCode)
 {
+	TCarteCode Code;
+	if (pCode == 0)
+	{
+		pCode = &Code;
+	}
+	*pCode = CarteOK;
+
 	char New[CARTE_MAX_CHEMIN + 10], Old[CARTE_MAX_CHEMIN + 10];
 	snprintf (New, sizeof New, "%s.nouveau", pChemin);
 	snprintf (Old, sizeof Old, "%s.ancien", pChemin);
@@ -566,11 +576,12 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 	const char *pRaison, *pTexte;
 	if (nCle == 0)		// retirée entre-temps
 	{
+		*pCode = CarteCle;
 		Rendre ();
 		return Echec (pService, pChemin, CarteCleAbsente.pJournal, CarteCleAbsente.pTexte,
 			      pMessage, nMessage);
 	}
-	if (Refuse (pChemin, bCle, nBranchement, &pRaison, &pTexte))
+	if (Refuse (pChemin, bCle, nBranchement, &pRaison, &pTexte, pCode))
 	{
 		Rendre ();
 		return Echec (pService, pChemin, pRaison, pTexte, pMessage, nMessage);
@@ -586,6 +597,7 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 	if (t->Resultat != ResultatOK)
 	{
 		Rendre ();
+		*pCode = t->Resultat == ResultatOuverture ? CarteParentAbsent : CartePleine;
 		return t->Resultat == ResultatOuverture
 		       ? Echec (pService, pChemin, "dossier absent ?", "dossier absent ?", pMessage, nMessage)
 		       : Echec (pService, pChemin, "carte pleine ?", "carte pleine ?", pMessage, nMessage);
@@ -594,7 +606,7 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 	// La fin entre deux trames, sans rendre la main : LOCI a pu monter la
 	// disquette, la clé a pu être retirée pendant l'écriture
 	(*s_pAttenteTrame) ();
-	if (Refuse (pChemin, bCle, nBranchement, &pRaison, &pTexte))
+	if (Refuse (pChemin, bCle, nBranchement, &pRaison, &pTexte, pCode))
 	{
 		f_unlink (New);
 		Rendre ();
@@ -610,6 +622,7 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 		{
 			f_unlink (New);
 			Rendre ();
+			*pCode = CarteErreur;
 			return Echec (pService, pChemin, "fichier ouvert ?", "fichier ouvert ?", pMessage, nMessage);
 		}
 	}
@@ -619,6 +632,7 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 		{
 			f_rename (Old, pChemin);	// l'ancien reprend sa place
 		}
+		*pCode = CarteErreur;
 		Rendre ();
 		return Echec (pService, pChemin, "renommage impossible", "renommage impossible", pMessage, nMessage);
 	}
@@ -641,4 +655,442 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 			  bNoyau ? ", pris en compte au prochain démarrage" : "");
 	}
 	return true;
+}
+
+// ── Opérations du serveur WebDAV (dav.cpp) ───────────────────────────────
+//
+// Contrôles et opérations courtes (f_stat, f_unlink, f_mkdir, f_rename)
+// entre deux trames, sans rendre la main, après la fin du travail du cœur 2
+// (Prendre) : comme les listes de la page web. Les fichiers copiés sont
+// lus et écrits par le cœur 2 (CarteLire, CarteEcrire).
+//
+// FatFs sans verrou des fichiers ouverts (FF_FS_LOCK 0) : un fichier que
+// l'Oric garde ouvert (API de fichiers de LOCI) n'est pas protégé, comme
+// pour TFTP et la page web. Les disquettes montées le sont (elles sont en
+// mémoire et seraient réécrites par-dessus).
+
+const char *CarteTexte (TCarteCode Code)
+{
+	switch (Code)
+	{
+	case CarteOK:		return "fait";
+	case CarteAbsent:	return "introuvable";
+	case CarteParentAbsent:	return "dossier de destination absent";
+	case CarteExiste:	return "destination presente";
+	case CarteMontee:	return "disquette montee";
+	case CarteProtegee:	return "protege";
+	case CarteNonVide:	return "dossier non vide";
+	case CarteCle:		return CarteCleAbsente.pJournal;
+	case CartePleine:	return "carte pleine ?";
+	case CarteTropGros:	return "trop gros";
+	case CarteDossier:	return "dossier refuse";
+	case CarteErreur:	break;
+	}
+	return "refuse par FatFs";
+}
+
+static void Trame (void)
+{
+	(*s_pAttenteTrame) ();
+}
+
+static int CompareEntrees (const void *p1, const void *p2)
+{
+	const TCarteEntree *e1 = (const TCarteEntree *) p1, *e2 = (const TCarteEntree *) p2;
+	if (e1->bDossier != e2->bDossier)
+	{
+		return e1->bDossier ? -1 : 1;
+	}
+	return strcasecmp (e1->Nom, e2->Nom);
+}
+
+// Repris de web.cpp (LireDossier)
+FRESULT CarteListe (const char *pChemin, TCarteEntree *pEntrees, unsigned nMax,
+		    unsigned *pnEntrees, bool *pbTronque)
+{
+	unsigned nEntrees = 0;
+	*pbTronque = false;
+
+	Prendre ();
+	Trame ();
+
+	unsigned nCles = 0;
+	if (strcmp (pChemin, "SD:/") == 0)
+	{
+		for (unsigned i = 0; i < CLES_MAX && nCles < nMax; i++)
+		{
+			unsigned nSerie, nBranchement;
+			if (cles_usb_etat (ClesUSBVolume (i), &nSerie, &nBranchement) == 1)
+			{
+				TCarteEntree *e = &pEntrees[nCles++];
+				memset (e, 0, sizeof *e);
+				snprintf (e->Nom, sizeof e->Nom, "%s", ClesUSBVolume (i));
+				e->bDossier = true;
+			}
+		}
+		nEntrees = nCles;
+	}
+
+	DIR Dir;
+	FRESULT Res = f_opendir (&Dir, pChemin);
+	if (Res == FR_OK)
+	{
+		bool bFinVolume = pChemin[strlen (pChemin) - 1] == '/';	// « SD:/ »
+		FILINFO Info;
+		while (f_readdir (&Dir, &Info) == FR_OK && Info.fname[0] != '\0')
+		{
+			if (nEntrees == nMax)
+			{
+				*pbTronque = true;
+				break;
+			}
+			TCarteEntree *e = &pEntrees[nEntrees++];
+			memcpy (e->Nom, Info.fname, sizeof e->Nom);	// même taille
+			e->Nom[sizeof e->Nom - 1] = '\0';
+			e->nTaille = Info.fsize;
+			e->nDate = Info.fdate;
+			e->nHeure = Info.ftime;
+			e->bDossier = (Info.fattrib & AM_DIR) != 0;
+			e->bMonte = false;
+			if (!e->bDossier)
+			{
+				char Complet[CARTE_MAX_CHEMIN + FF_MAX_LFN + 2];
+				snprintf (Complet, sizeof Complet, "%s%s%s", pChemin,
+					  bFinVolume ? "" : "/", e->Nom);
+				e->bMonte = oric_machine_disk_mounted (Complet);
+			}
+		}
+		f_closedir (&Dir);
+	}
+	Rendre ();
+
+	qsort (pEntrees + nCles, nEntrees - nCles, sizeof (TCarteEntree), CompareEntrees);
+	*pnEntrees = nEntrees;
+	return Res;
+}
+
+static bool EstRacine (const char *pChemin)
+{
+	size_t n = strlen (pChemin);
+	return n > 0 && pChemin[n - 1] == '/';		// « SD:/ », « USB:/ »
+}
+
+bool CarteEstProtegee (const char *pChemin)
+{
+	static const char *const Demarrage[] =
+	{
+		"kernel8-32.img", "config.txt", "cmdline.txt",
+		"bootcode.bin", "start.elf", "fixup.dat", 0
+	};
+	if (EstRacine (pChemin))
+	{
+		return true;
+	}
+	if (strncasecmp (pChemin, "SD:/", 4) == 0 && strchr (pChemin + 4, '/') == 0)
+	{
+		for (unsigned i = 0; Demarrage[i] != 0; i++)
+		{
+			if (strcasecmp (pChemin + 4, Demarrage[i]) == 0)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// Entre deux trames : état d'un chemin
+static TCarteCode Stat (const char *pChemin, TCarteEntree *e)
+{
+	memset (e, 0, sizeof *e);
+	unsigned nSerie, nBranchement;
+	if (cles_usb_etat (pChemin, &nSerie, &nBranchement) == 0)
+	{
+		return CarteCle;
+	}
+	const char *pNom = strrchr (pChemin, '/');
+	snprintf (e->Nom, sizeof e->Nom, "%s", pNom != 0 ? pNom + 1 : pChemin);
+	if (EstRacine (pChemin))
+	{
+		e->bDossier = true;			// f_stat refuse la racine
+		return CarteOK;
+	}
+	FILINFO Info;
+	FRESULT Res = f_stat (pChemin, &Info);
+	if (Res == FR_NO_FILE || Res == FR_NO_PATH)
+	{
+		return CarteAbsent;
+	}
+	if (Res != FR_OK)
+	{
+		return CarteErreur;
+	}
+	e->nTaille = Info.fsize;
+	e->nDate = Info.fdate;
+	e->nHeure = Info.ftime;
+	e->bDossier = (Info.fattrib & AM_DIR) != 0;
+	e->bMonte = !e->bDossier && oric_machine_disk_mounted (pChemin);
+	return CarteOK;
+}
+
+static bool DossierVide (const char *pChemin)
+{
+	DIR Dir;
+	if (f_opendir (&Dir, pChemin) != FR_OK)
+	{
+		return false;
+	}
+	FILINFO Info;
+	bool bVide = f_readdir (&Dir, &Info) == FR_OK && Info.fname[0] == '\0';
+	f_closedir (&Dir);
+	return bVide;
+}
+
+static TCarteCode Note (TCarteCode Code, const char *pService, const char *pAction,
+			const char *pChemin, const char *pDest = 0)
+{
+	JournalPrintf ("%s : %s %s%s%s : %s\n", pService, pAction, pChemin,
+		       pDest != 0 ? " -> " : "", pDest != 0 ? pDest : "", CarteTexte (Code));
+	return Code;
+}
+
+TCarteCode CarteInfo (const char *pChemin, TCarteEntree *pInfo)
+{
+	Prendre ();
+	Trame ();
+	TCarteCode Code = Stat (pChemin, pInfo);
+	Rendre ();
+	return Code;
+}
+
+TCarteCode CarteEffacer (const char *pChemin, const char *pService)
+{
+	if (CarteEstProtegee (pChemin))
+	{
+		return Note (CarteProtegee, pService, "effacer", pChemin);
+	}
+	Prendre ();
+	Trame ();
+	TCarteEntree e;
+	TCarteCode Code = Stat (pChemin, &e);
+	if (Code == CarteOK)
+	{
+		if (e.bMonte)
+		{
+			Code = CarteMontee;
+		}
+		else if (e.bDossier && !DossierVide (pChemin))
+		{
+			Code = CarteNonVide;
+		}
+		else if (f_unlink (pChemin) != FR_OK)
+		{
+			Code = CarteErreur;
+		}
+	}
+	Rendre ();
+	return Note (Code, pService, "effacer", pChemin);
+}
+
+TCarteCode CarteCreerDossier (const char *pChemin, const char *pService)
+{
+	if (EstRacine (pChemin))
+	{
+		return Note (CarteExiste, pService, "creer le dossier", pChemin);
+	}
+	Prendre ();
+	Trame ();
+	TCarteCode Code = CarteOK;
+	unsigned nSerie, nBranchement;
+	if (cles_usb_etat (pChemin, &nSerie, &nBranchement) == 0)
+	{
+		Code = CarteCle;
+	}
+	else
+	{
+		switch (f_mkdir (pChemin))
+		{
+		case FR_OK:		break;
+		case FR_EXIST:		Code = CarteExiste;		break;
+		case FR_NO_PATH:	Code = CarteParentAbsent;	break;
+		case FR_DENIED:		Code = CartePleine;		break;
+		default:		Code = CarteErreur;		break;
+		}
+	}
+	Rendre ();
+	return Note (Code, pService, "creer le dossier", pChemin);
+}
+
+static bool MemeVolume (const char *p1, const char *p2)
+{
+	const char *c1 = strchr (p1, ':'), *c2 = strchr (p2, ':');
+	return    c1 != 0 && c2 != 0 && c1 - p1 == c2 - p2
+	       && strncasecmp (p1, p2, c1 - p1) == 0;
+}
+
+// pDest est pSource, ou dans pSource (dossier déplacé dans lui-même) ?
+static bool Dans (const char *pDest, const char *pSource)
+{
+	size_t n = strlen (pSource);
+	return    strncasecmp (pDest, pSource, n) == 0
+	       && (pDest[n] == '\0' || pDest[n] == '/');
+}
+
+// Contrôles communs aux déplacements et copies, entre deux trames :
+// destination présente (*pbRemplace), à remplacer si bEcraser
+static TCarteCode ControleDest (const char *pDest, bool bEcraser, bool bSourceDossier,
+				bool *pbRemplace, TCarteEntree *pDestInfo)
+{
+	TCarteCode Code = Stat (pDest, pDestInfo);
+	if (Code == CarteAbsent)
+	{
+		return CarteOK;
+	}
+	if (Code != CarteOK)
+	{
+		return Code;
+	}
+	*pbRemplace = true;
+	if (!bEcraser)
+	{
+		return CarteExiste;
+	}
+	if (pDestInfo->bMonte)
+	{
+		return CarteMontee;
+	}
+	if (pDestInfo->bDossier)
+	{
+		// un dossier n'est remplacé que vide, et par un dossier
+		if (!bSourceDossier)
+		{
+			return CarteDossier;
+		}
+		return DossierVide (pDest) ? CarteOK : CarteNonVide;
+	}
+	return bSourceDossier ? CarteDossier : CarteOK;
+}
+
+TCarteCode CarteCopier (const char *pSource, const char *pDest, bool bEcraser,
+			bool *pbRemplace, unsigned nMax, const char *pService)
+{
+	*pbRemplace = false;
+	if (CarteEstProtegee (pDest) || Dans (pDest, pSource))
+	{
+		return Note (CarteProtegee, pService, "copier", pSource, pDest);
+	}
+
+	Prendre ();
+	Trame ();
+	TCarteEntree Source, Dest;
+	TCarteCode Code = Stat (pSource, &Source);
+	if (Code == CarteOK && Source.bDossier)
+	{
+		Code = CarteDossier;		// le client copie fichier par fichier
+	}
+	if (Code == CarteOK)
+	{
+		Code = ControleDest (pDest, bEcraser, false, pbRemplace, &Dest);
+	}
+	Rendre ();
+	if (Code != CarteOK)
+	{
+		return Note (Code, pService, "copier", pSource, pDest);
+	}
+
+	u8 *pDonnees;
+	unsigned nTaille;
+	if (!CarteLire (pSource, &pDonnees, &nTaille, nMax))
+	{
+		return Note (nTaille > nMax ? CarteTropGros : CarteErreur, pService, "copier",
+			     pSource, pDest);
+	}
+	CarteEcrire (pDest, pDonnees, nTaille, pService, 0, 0, &Code);	// journal
+	free (pDonnees);
+	return Code;
+}
+
+TCarteCode CarteDeplacer (const char *pSource, const char *pDest, bool bEcraser,
+			  bool *pbRemplace, unsigned nMax, const char *pService)
+{
+	*pbRemplace = false;
+	// Même nom à la casse près : renommage du même fichier (FAT ne
+	// distingue pas la casse), pas un déplacement dans lui-même
+	bool bCasse = strcasecmp (pSource, pDest) == 0 && strcmp (pSource, pDest) != 0;
+	if (   CarteEstProtegee (pSource) || CarteEstProtegee (pDest)
+	    || (!bCasse && Dans (pDest, pSource)))
+	{
+		return Note (CarteProtegee, pService, "deplacer", pSource, pDest);
+	}
+
+	Prendre ();
+	Trame ();
+	TCarteEntree Source, Dest;
+	TCarteCode Code = Stat (pSource, &Source);
+	if (Code == CarteOK)
+	{
+		if (   Source.bMonte
+		    || (Source.bDossier && oric_machine_disk_mounted_under (pSource)))
+		{
+			Code = CarteMontee;
+		}
+		else if (!MemeVolume (pSource, pDest) && Source.bDossier)
+		{
+			Code = CarteDossier;	// entre la carte et une clé : fichiers seulement
+		}
+	}
+	if (Code != CarteOK || !MemeVolume (pSource, pDest))
+	{
+		Rendre ();
+		if (Code != CarteOK)
+		{
+			return Note (Code, pService, "deplacer", pSource, pDest);
+		}
+		// Entre deux volumes : copie (journal de CarteEcrire), puis effacement
+		Code = CarteCopier (pSource, pDest, bEcraser, pbRemplace, nMax, pService);
+		return Code == CarteOK ? CarteEffacer (pSource, pService) : Code;
+	}
+
+	// Même volume : renommage. Fichier remplacé : mis de côté d'abord, remis
+	// en place si le renommage échoue.
+	Code = bCasse ? CarteOK : ControleDest (pDest, bEcraser, Source.bDossier, pbRemplace, &Dest);
+	char Old[CARTE_MAX_CHEMIN + 10];
+	snprintf (Old, sizeof Old, "%s.ancien", pDest);
+	bool bMisDeCote = false;
+	if (Code == CarteOK && *pbRemplace)
+	{
+		if (Dest.bDossier)
+		{
+			Code = f_unlink (pDest) == FR_OK ? CarteOK : CarteErreur;	// vide
+		}
+		else
+		{
+			f_unlink (Old);			// reste d'une coupure
+			bMisDeCote = f_rename (pDest, Old) == FR_OK;
+			Code = bMisDeCote ? CarteOK : CarteErreur;
+		}
+	}
+	if (Code == CarteOK)
+	{
+		switch (f_rename (pSource, pDest))
+		{
+		case FR_OK:		break;
+		case FR_NO_PATH:	Code = CarteParentAbsent;	break;
+		case FR_EXIST:		Code = CarteExiste;		break;
+		default:		Code = CarteErreur;		break;
+		}
+	}
+	if (bMisDeCote)
+	{
+		if (Code == CarteOK)
+		{
+			f_unlink (Old);
+		}
+		else
+		{
+			f_rename (Old, pDest);
+		}
+	}
+	Rendre ();
+	return Note (Code, pService, "deplacer", pSource, pDest);
 }

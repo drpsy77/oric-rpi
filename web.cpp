@@ -372,87 +372,6 @@ THTTPStatus COricWeb::GetContent (const char *pPath, const char *pParams,
 
 // ── Liste d'un dossier ───────────────────────────────────────────────────
 
-struct TEntree
-{
-	char Nom[FF_MAX_LFN + 1];
-	FSIZE_t nTaille;
-	WORD nDate, nHeure;
-	bool bDossier;
-	bool bMonte;
-};
-
-static int Compare (const void *p1, const void *p2)
-{
-	const TEntree *e1 = (const TEntree *) p1, *e2 = (const TEntree *) p2;
-	if (e1->bDossier != e2->bDossier)
-	{
-		return e1->bDossier ? -1 : 1;
-	}
-	return strcasecmp (e1->Nom, e2->Nom);
-}
-
-// Entrées de pChemin (chemin de FatFs, CarteChemin), triées : dossiers puis
-// fichiers. À la racine de la carte, les clés USB présentes d'abord.
-// Touche la carte : après CarteReserver et WaitIdle, sans rendre la main.
-static FRESULT LireDossier (const char *pChemin, TEntree *pEntrees, unsigned *pnEntrees,
-			    bool *pbTronque)
-{
-	unsigned nEntrees = 0;
-	*pbTronque = false;
-
-	unsigned nCles = 0;
-	if (strcmp (pChemin, "SD:/") == 0)
-	{
-		for (unsigned i = 0; i < CLES_MAX; i++)
-		{
-			unsigned nSerie, nBranchement;
-			if (cles_usb_etat (ClesUSBVolume (i), &nSerie, &nBranchement) == 1)
-			{
-				TEntree *e = &pEntrees[nCles++];
-				memset (e, 0, sizeof *e);
-				snprintf (e->Nom, sizeof e->Nom, "%s", ClesUSBVolume (i));
-				e->bDossier = true;
-			}
-		}
-		nEntrees = nCles;
-	}
-
-	DIR Dir;
-	FRESULT Res = f_opendir (&Dir, pChemin);
-	if (Res == FR_OK)
-	{
-		bool bFinVolume = pChemin[strlen (pChemin) - 1] == '/';	// « SD:/ »
-		FILINFO Info;
-		while (f_readdir (&Dir, &Info) == FR_OK && Info.fname[0] != '\0')
-		{
-			if (nEntrees == MAX_ENTREES)
-			{
-				*pbTronque = true;
-				break;
-			}
-			TEntree *e = &pEntrees[nEntrees++];
-			memcpy (e->Nom, Info.fname, sizeof e->Nom);	// même taille
-			e->Nom[sizeof e->Nom - 1] = '\0';
-			e->nTaille = Info.fsize;
-			e->nDate = Info.fdate;
-			e->nHeure = Info.ftime;
-			e->bDossier = (Info.fattrib & AM_DIR) != 0;
-			e->bMonte = false;
-			if (!e->bDossier)
-			{
-				char Complet[CARTE_MAX_CHEMIN + FF_MAX_LFN + 2];
-				snprintf (Complet, sizeof Complet, "%s%s%s", pChemin,
-					  bFinVolume ? "" : "/", e->Nom);
-				e->bMonte = oric_machine_disk_mounted (Complet);
-			}
-		}
-		f_closedir (&Dir);
-	}
-	qsort (pEntrees + nCles, nEntrees - nCles, sizeof (TEntree), Compare);
-	*pnEntrees = nEntrees;
-	return Res;
-}
-
 static void Taille (CPage *pPage, FSIZE_t n)
 {
 	if (n < 10000)
@@ -484,20 +403,17 @@ THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 	CarteRelatif (Chemin, Relatif, sizeof Relatif);
 	const char *pRel = Relatif;		// « oric/usb », « USB:/dSK », « » à la racine
 
-	TEntree *pEntrees = (TEntree *) malloc (MAX_ENTREES * sizeof (TEntree));
+	TCarteEntree *pEntrees = (TCarteEntree *) malloc (MAX_ENTREES * sizeof (TCarteEntree));
 	if (pEntrees == 0)
 	{
 		return HTTPInternalServerError;
 	}
 
 	// Carte : cœur 2 libre (fichier en cours fini), puis entre deux trames,
-	// sans rendre la main
-	CarteReserver ();
-	(*m_pHooks->WaitIdle) ();
+	// sans rendre la main (CarteListe)
 	unsigned nEntrees;
 	bool bTronque;
-	FRESULT Res = LireDossier (Chemin, pEntrees, &nEntrees, &bTronque);
-	CarteLiberer ();
+	FRESULT Res = CarteListe (Chemin, pEntrees, MAX_ENTREES, &nEntrees, &bTronque);
 
 	CString Etat;
 	(*m_pHooks->Status) (&Etat);
@@ -570,7 +486,7 @@ THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 		}
 		for (unsigned i = 0; i < nEntrees; i++)
 		{
-			TEntree *e = &pEntrees[i];
+			TCarteEntree *e = &pEntrees[i];
 			pPage->Texte ("<tr><td><a href=\"");
 			pPage->Texte (e->bDossier ? "/?d=" : "/f/");
 			if (*pRel != '\0')
@@ -648,19 +564,16 @@ THTTPStatus COricWeb::Liste (const char *pDossier, CPage *pPage)
 		return HTTPOK;
 	}
 
-	TEntree *pEntrees = (TEntree *) malloc (MAX_ENTREES * sizeof (TEntree));
+	TCarteEntree *pEntrees = (TCarteEntree *) malloc (MAX_ENTREES * sizeof (TCarteEntree));
 	if (pEntrees == 0)
 	{
 		pPage->Texte ("erreur : memoire pleine\n");
 		return HTTPOK;
 	}
 
-	CarteReserver ();
-	(*m_pHooks->WaitIdle) ();
 	unsigned nEntrees;
 	bool bTronque;
-	FRESULT Res = LireDossier (Chemin, pEntrees, &nEntrees, &bTronque);
-	CarteLiberer ();
+	FRESULT Res = CarteListe (Chemin, pEntrees, MAX_ENTREES, &nEntrees, &bTronque);
 	if (Res != FR_OK)
 	{
 		pPage->Printf ("erreur : dossier introuvable\n");
@@ -669,7 +582,7 @@ THTTPStatus COricWeb::Liste (const char *pDossier, CPage *pPage)
 	{
 		for (unsigned i = 0; i < nEntrees; i++)
 		{
-			const TEntree *e = &pEntrees[i];
+			const TCarteEntree *e = &pEntrees[i];
 			if (e->bDossier)
 			{
 				pPage->Printf ("d  %10s  %-16s  %s/\n", "-", "-", e->Nom);

@@ -146,6 +146,25 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   `CarteEcrire` par renommage). `carte.sh` (RPI 400, `ORIC=oric.local`) :
   `ls`, `envoyer dossier fichier...` (un `put` par fichier, vérifié par
   `/l/` : taille et date de l'envoi), `lire`, `journal`.
+- `dav=81` (avec `tftp=`, même client ; `dav=1` = 81) : serveur WebDAV
+  de la carte (`dav.cpp`, classe 1 sans verrous, HTTP/1.1 persistant sur
+  `CSocket`, une tâche du cœur 0 par connexion, 4 au plus ; tâches
+  comptées avant chaque création, `MAX_TASKS` 20 : panique au-delà) :
+  `dav://oric.local:81/` dans PCManFM, `gio mount`. Copier, effacer,
+  renommer, déplacer, créer des dossiers ; fichiers de 64 Mo au plus, en
+  mémoire (PUT puis `CarteEcrire`). Dossier non vide jamais effacé (409 :
+  le client confirme puis efface fichier par fichier ; gvfs refuse
+  lui-même). Protégés : disquette montée (423), racine d'un volume et
+  fichiers de démarrage de la carte (403 en DELETE et MOVE ; PUT du noyau
+  permis). Noms créés en ASCII seulement (400) ; noms existants en page
+  850 rendus en UTF-8 (`ff_oem2uni`). Entre carte et clé : fichier copié
+  puis effacé, dossier refusé. LOCK → 405 (`davfs2` : `use_locks 0`).
+  Opérations dans `carte.cpp` (`CarteListe`, `CarteInfo`, `CarteEffacer`,
+  `CarteCreerDossier`, `CarteDeplacer`, `CarteCopier`). Banc natif :
+  `banc-dav/` (`make`, `./banc-dav 8181 RACINE` : `RACINE/sd`,
+  `RACINE/usb`, `oric/usb/monte.dsk` vue montée, client 127.0.0.1 ;
+  `gio mount dav://127.0.0.1:8181/`). Plan, décisions et essais :
+  `docs/plan-webdav.md`.
 - `nom=oric` : mDNS du port (`mdns.cpp`, tâche du cœur 0, avec le réseau) :
   la Pi répond à `oric.local` ; les noms en `.local` (`tftp=`, `getaddrinfo`
   du modem dans `netrelay.cpp`, donc ATDT et `HOSTS` de CP/A) sont cherchés
@@ -202,6 +221,8 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `tftp.cpp/.h` | serveur TFTP de la carte SD (`tftp=`), tâche du cœur 0 |
 | `web.cpp/.h` | page web de la carte (`web=`) : liste, lecture, envoi, état, redémarrage |
+| `dav.cpp/.h` | serveur WebDAV de la carte (`dav=`) : liste, lecture, envoi, effacement, dossiers, déplacement, copie |
+| `banc-dav/` | banc natif de `dav.cpp` et `carte.cpp` (Linux, FatFs sur fichiers POSIX), essais par `gio` et `curl` |
 | `cles.cpp/.h` | clés USB de la Pi (umsd1/2 → `USB:`, `USB2:`) servies par LOCI : branchement et retrait à chaud, `statvfs` des volumes |
 | `carte.cpp/.h` | accès réseau à la carte, commun à TFTP et web (client, renommage, disquettes montées) ; lectures et écritures par le cœur 2 |
 | `mdns.cpp/.h` | mDNS : `nom.local` de la Pi, noms en `.local` des autres machines |
@@ -340,9 +361,10 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   `_end` (fin de la BSS) dépassait `MEM_KERNEL_END` (0x8000 +
   `KERNEL_MAX_SIZE`, 4 Mo dans le `Config.mk` de Circle) ; la BSS
   recouvrait la pile du cœur 0. Circle ne le vérifie pas : `limite.ld`
-  (Makefile) refuse maintenant l'édition de liens. Marge restante ~39 Ko :
-  gros tampons par `malloc`, pas en statique (`arm-none-eabi-nm
-  kernel8-32.elf | grep " _end$"`).
+  (Makefile) refuse maintenant l'édition de liens. Gros tampons par
+  `malloc`, pas en statique (`arm-none-eabi-nm kernel8-32.elf | grep
+  " _end$"`). Depuis le 22/11/2026, `s_emu` (2,6 Mo) est dans le tas
+  (`oric_emu ()` de `oric_machine.c`) : `_end` à ~1,4 Mo.
 
 ## État (16/11/2026)
 
@@ -547,6 +569,7 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    `oric/loci/montee.dsk` à effacer : `docs/plan-coeur2-carte.md`.
    Ensuite : serveur **WebDAV** (`dav://oric.local:81/` dans PCManFM par
    gvfs, `davfs2` pour un point de montage ; effacer, renommer, dossiers),
-   préféré à 9P, NFS et SMB. Plan : `docs/plan-webdav.md` (décisions à
-   prendre par Pierre au début ; étape 0 : `s_emu` par `calloc`, le noyau
-   n'ayant plus que ~39 Ko de marge sous `KERNEL_MAX_SIZE`).
+   préféré à 9P, NFS et SMB. **Fait (22/11/2026), vérifié au banc natif
+   (`banc-dav/` : gio, curl), à essayer sur la 3B+** : `dav=81` (voir
+   Carte SD) ; décisions de Pierre et essais restants :
+   `docs/plan-webdav.md`. Étape 0 faite : `s_emu` par `calloc`.

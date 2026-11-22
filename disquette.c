@@ -320,6 +320,27 @@ bool disquette_montee(emulator_t* emu, const char* path) {
     return false;
 }
 
+/* [port] Une disquette montée dans le dossier dir (ou plus bas) ? Pour le
+ * déplacement d'un dossier par WebDAV (carte.cpp). */
+bool disquette_montee_sous(emulator_t* emu, const char* dir) {
+    char cherche[256], monte[256];
+    normaliser(dir, cherche, sizeof(cherche) - 1);
+    size_t n = strlen(cherche);
+    if (n == 0 || cherche[n - 1] != '/') { cherche[n++] = '/'; cherche[n] = '\0'; }
+    for (int d = 0; d < NB_LECTEURS; d++) {
+        const loci_t* l = &emu->loci;
+        if (emu->card_on[CARD_IDX_loci] && l->dsk_image[d] && l->dsk_host_path[d][0]) {
+            normaliser(l->dsk_host_path[d], monte, sizeof(monte));
+            if (strncmp(cherche, monte, n) == 0) return true;
+        }
+        if (emu->card_on[CARD_IDX_microdisc] && emu->disks[d] && s_microdisc_path[d]) {
+            normaliser(s_microdisc_path[d], monte, sizeof(monte));
+            if (strncmp(cherche, monte, n) == 0) return true;
+        }
+    }
+    return false;
+}
+
 void disquette_flush_attente(emulator_t* emu) {
     bool attente = s_calme >= 0;
     for (int d = 0; d < NB_LECTEURS; d++)

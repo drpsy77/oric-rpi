@@ -186,6 +186,21 @@ date de l'envoi) : le serveur TFTP acquitte avant d'écrire, et `tftp -c`
 rend toujours 0, un échec ne se voyant sinon que dans le journal.
 `ORIC=` choisit une autre machine que `oric.local`.
 
+Carte vue comme un dossier (WebDAV) : `dav=81` (`dav=1` vaut 81), avec
+`tftp=`, dont il reprend le seul ordinateur autorisé, puis
+`dav://oric.local:81/` dans PCManFM (barre d'adresse), ou
+`gio mount dav://oric.local:81/`. On y copie dans les deux sens, efface,
+renomme, déplace, crée des dossiers ; les clés USB de la Pi sont en tête
+(`USB:`, `USB2:`). Fichiers de 64 Mo au plus. Mêmes protections que TFTP,
+et en plus : un dossier n'est effacé que vide (PCManFM demande
+confirmation puis efface son contenu fichier par fichier), ni la racine
+ni les fichiers de démarrage (`kernel8-32.img`, `config.txt`,
+`cmdline.txt`, `bootcode.bin`, `start.elf`, `fixup.dat`) ne sont effacés
+ou déplacés (un nouveau `kernel8-32.img` peut être copié), une disquette
+montée n'est ni effacée ni déplacée, et un nom créé doit être en ASCII
+(un accent serait illisible sur l'Oric). Pas de verrous : avec `davfs2`,
+`use_locks 0` dans `davfs2.conf`. L'Oric continue pendant les copies.
+
 Heure : avec le réseau (modem ou TFTP), la Pi la prend par NTP dès que le Wi-Fi a son adresse
 (`ntp=pool.ntp.org`, nouvel essai toutes les 5 min sans réponse). Les
 fichiers écrits sur la carte (disquettes, journal) sont alors datés, et le

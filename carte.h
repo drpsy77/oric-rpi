@@ -1,7 +1,7 @@
 //
-// carte.h — Accès à la carte SD depuis le réseau (TFTP, page web)
+// carte.h — Accès à la carte SD depuis le réseau (TFTP, page web, WebDAV)
 //
-// Écrit pour le port. Commun à tftp.cpp et web.cpp : client autorisé
+// Écrit pour le port. Commun à tftp.cpp, web.cpp et dav.cpp : client autorisé
 // (tftp=), noms de fichiers, lecture d'un fichier entier, remplacement
 // d'un fichier sans le laisser à moitié écrit.
 //
@@ -18,6 +18,7 @@
 #include <circle/net/netsubsystem.h>
 #include <circle/net/ipaddress.h>
 #include <circle/types.h>
+#include <fatfs/ff.h>
 
 #define CARTE_MAX_CHEMIN	300		// « SD:/ » ou « USB2:/ » + nom
 
@@ -96,12 +97,81 @@ bool CarteLire (const char *pChemin, u8 **ppDonnees, unsigned *pTaille, unsigned
 // du fichier en sortie (0 si absent) ; faux s'il n'y tient pas.
 bool CarteLireDans (const char *pChemin, u8 *pTampon, unsigned *pTaille);
 
+// Résultat des opérations de la carte (WebDAV : code HTTP de la réponse)
+enum TCarteCode
+{
+	CarteOK,
+	CarteAbsent,		// fichier ou dossier introuvable
+	CarteParentAbsent,	// dossier de destination introuvable
+	CarteExiste,		// destination présente (remplacement non demandé)
+	CarteMontee,		// disquette montée (ou dossier qui en contient une)
+	CarteProtegee,		// racine d'un volume, fichier de démarrage, dossier dans lui-même
+	CarteNonVide,		// dossier non vide
+	CarteCle,		// clé USB absente ou retirée
+	CartePleine,		// écriture impossible (carte pleine ?)
+	CarteTropGros,		// plus grand que la limite donnée
+	CarteDossier,		// refusé pour un dossier (copie, déplacement entre volumes)
+	CarteErreur		// autre refus de FatFs
+};
+
+// Texte d'un code, sans accent (journal)
+const char *CarteTexte (TCarteCode Code);
+
+// Entrée d'un dossier, ou d'un chemin (CarteInfo)
+struct TCarteEntree
+{
+	char Nom[FF_MAX_LFN + 1];	// en page 850 (FatFs)
+	FSIZE_t nTaille;
+	WORD nDate, nHeure;		// FatFs (0 : sans date), heure locale
+	bool bDossier;
+	bool bMonte;			// disquette montée
+};
+
+// Entrées de pChemin (chemin de FatFs, CarteChemin), nMax au plus, triées :
+// dossiers puis fichiers. À la racine de la carte (« SD:/ »), les clés USB
+// présentes d'abord (« USB: », dossier). Faite entre deux trames, après la
+// fin du travail du cœur 2.
+FRESULT CarteListe (const char *pChemin, TCarteEntree *pEntrees, unsigned nMax,
+		    unsigned *pnEntrees, bool *pbTronque);
+
+// Un fichier ou un dossier (racine d'un volume comprise : dossier sans date)
+TCarteCode CarteInfo (const char *pChemin, TCarteEntree *pInfo);
+
+// Racine d'un volume, ou fichier de démarrage à la racine de la carte
+// (kernel8-32.img, config.txt, cmdline.txt, bootcode.bin, start.elf,
+// fixup.dat) : ni effacé, ni déplacé, ni remplacé par un déplacement ou une
+// copie (CarteEcrire, envoi d'un fichier, reste permis : nouveau noyau).
+bool CarteEstProtegee (const char *pChemin);
+
+// Les opérations suivantes (WebDAV) notent leur résultat dans le journal,
+// préfixe pService. Contrôles et opérations courtes entre deux trames.
+//
+// Fichier, ou dossier vide (un dossier non vide est refusé : le client
+// efface d'abord son contenu, après sa propre confirmation).
+TCarteCode CarteEffacer (const char *pChemin, const char *pService);
+
+TCarteCode CarteCreerDossier (const char *pChemin, const char *pService);
+
+// Déplacement ou renommage. Même volume : f_rename (fichier ou dossier).
+// Entre la carte et une clé : fichier seulement, copié (CarteCopier) puis
+// effacé. Destination présente : remplacée si bEcraser (*pbRemplace),
+// sauf un dossier non vide. Refus : source ou destination protégée,
+// disquette montée (pour un dossier : une disquette montée dedans).
+TCarteCode CarteDeplacer (const char *pSource, const char *pDest, bool bEcraser,
+			  bool *pbRemplace, unsigned nMax, const char *pService);
+
+// Copie d'un fichier (lu en mémoire, nMax octets au plus, puis CarteEcrire)
+TCarteCode CarteCopier (const char *pSource, const char *pDest, bool bEcraser,
+			bool *pbRemplace, unsigned nMax, const char *pService);
+
 // Remplace (ou crée) pChemin : écrit sous « x.nouveau » par le cœur 2, puis,
 // entre deux trames, l'ancien devient « x.ancien », le nouveau prend son
 // nom, l'ancien est effacé. Refusé pour une disquette montée (vérifié avant
 // et après l'écriture de « x.nouveau » : LOCI a pu la monter entre-temps). Résultat dans le journal (préfixe pService) et,
 // en clair, dans pMessage (peut être 0).
+// Raison d'un refus dans *pCode (peut être 0).
 bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
-		  const char *pService, char *pMessage = 0, unsigned nMessage = 0);
+		  const char *pService, char *pMessage = 0, unsigned nMessage = 0,
+		  TCarteCode *pCode = 0);
 
 #endif

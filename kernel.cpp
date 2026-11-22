@@ -57,6 +57,10 @@
 //   web=80                        avec tftp= : page web de la carte SD sur ce
 //                                 port (liste, lecture, envoi, état,
 //                                 redémarrage), même client seulement (web.cpp)
+//   dav=81                        avec tftp= : serveur WebDAV de la carte SD et
+//                                 des clés USB sur ce port (dav://oric.local:81/
+//                                 dans PCManFM : copier, effacer, renommer,
+//                                 dossiers), même client seulement (dav.cpp)
 //   nom=oric                      avec le réseau : nom de la Pi (oric.local,
 //                                 mDNS) ; les noms en .local des autres
 //                                 machines sont aussi trouvés (mdns.cpp)
@@ -77,6 +81,7 @@
 #include "tftp.h"
 #include "mdns.h"
 #include "web.h"
+#include "dav.h"
 #include "cles.h"
 #include "carte.h"
 
@@ -168,6 +173,7 @@ CKernel::CKernel (void)
 	m_pTFTP (0),
 	m_pMDNS (0),
 	m_pWeb (0),
+	m_pDAV (0),
 	m_pNTPDaemon (0),
 	m_nClockCheck (0),
 	m_bClockSet (false),
@@ -456,6 +462,27 @@ void CKernel::UpdateNetwork (void)
 			JournalPrintf ("Web : actif, http://%s.local%s%s/ , client autorise %s\n",
 				       Option ("nom", "oric"), nWeb != 80 ? ":" : "",
 				       nWeb != 80 ? Option ("web") : "", Option ("tftp"));
+		}
+	}
+
+	// Serveur WebDAV de la carte : même client, une tâche par connexion
+	// (DAV_CONNEXIONS au plus)
+	unsigned nDAV = OptionDecimal ("dav", 0);
+	if (nDAV == 1)
+	{
+		nDAV = 81;			// dav=1 : à côté de la page web
+	}
+	if (nDAV != 0 && nDAV < 65536)
+	{
+		if (!m_bTFTP)
+		{
+			JournalPrintf ("DAV : dav= demande tftp= (client autorise), serveur non demarre\n");
+		}
+		else
+		{
+			m_pDAV = new COricDAV (&mNet, (u16) nDAV, Option ("tftp"));
+			JournalPrintf ("DAV : actif, dav://%s.local:%u/ , client autorise %s\n",
+				       Option ("nom", "oric"), nDAV, Option ("tftp"));
 		}
 	}
 }

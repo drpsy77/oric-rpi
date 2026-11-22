@@ -1,7 +1,6 @@
 # Plan : serveur WebDAV de la carte (suite du point 14, 22/11/2026)
 
-À faire dans une nouvelle conversation, après accord de Pierre sur les
-« Décisions » ci-dessous. But : la carte SD et les clés USB de la Pi vues
+But : la carte SD et les clés USB de la Pi vues
 comme un dossier sur la RPI 400 (`dav://oric.local:81/` dans PCManFM, par
 gvfs ; `davfs2` pour un point de montage), avec ce que la page web et TFTP
 ne font pas : **effacer, renommer, déplacer, créer des dossiers**, et
@@ -30,7 +29,7 @@ Prérequis fait : lectures et écritures de fichiers par le cœur 2
   TFTP, la page web et ses connexions. gvfs ouvre plusieurs connexions à
   la fois : limiter (4 connexions WebDAV, les suivantes attendent dans
   `Listen`).
-- **Taille du noyau** : `_end` à ~39 Ko de `MEM_KERNEL_END`
+- **Taille du noyau** (avant l'étape 0) : `_end` à ~39 Ko de `MEM_KERNEL_END`
   (`KERNEL_MAX_SIZE` 4 Mo, `limite.ld`). Le code du serveur (20 à 40 Ko)
   ne tiendra pas. Le plus gros de la BSS est `s_emu` (`emulator_t` de
   Phosphoric, 2,6 Mo, statique dans `oric_machine.c`, code du port).
@@ -40,30 +39,75 @@ Prérequis fait : lectures et écritures de fichiers par le cœur 2
   lourde : `./configure --kernel-max-size 8` (mrproper, ~20 min, pilote
   Wi-Fi à recompiler).
 
-## Décisions (à Pierre, au début de la conversation)
+## Décisions (prises par Pierre le 22/11/2026)
 
-1. **Port** : serveur WebDAV séparé, option `dav=81` (avec `tftp=`, même
-   client autorisé), la page web restant sur `CHTTPDaemon` (port 80).
-   Proposé. (Plus tard, éventuellement : un seul serveur pour les deux.)
+1. **Port** : serveur WebDAV séparé, option `dav=81` (`dav=1` = 81), avec
+   `tftp=` (même client autorisé) ; la page web reste sur `CHTTPDaemon`.
 2. **PUT** : corps reçu en entier en mémoire puis `CarteEcrire`
-   (`x.nouveau` par le cœur 2, renommage entre deux trames : un envoi
-   coupé ne remplace jamais le fichier), limite 64 Mo par fichier.
-   Proposé pour commencer. Plus tard : écriture au fil de la réception
-   (morceaux de 64 Ko au cœur 2), sans limite de mémoire.
-3. **DELETE d'un dossier** : récursif (comme le demande WebDAV ; PCManFM
-   envoie un seul DELETE pour un dossier), refusé s'il contient une
-   disquette montée. Refus toujours : racine d'un volume, fichiers de
-   démarrage à la racine de la carte (`kernel8-32.img`, `config.txt`,
-   `cmdline.txt`, `bootcode.bin`, `start.elf`, `fixup.dat`) en DELETE et
-   MOVE (un PUT de `kernel8-32.img` reste permis : mise à jour du noyau).
-   À confirmer.
-4. **LOCK** : classe 1 seulement au début (`DAV: 1`, suffit à gvfs) ;
-   `davfs2` avec `use_locks 0`. Faux verrous (jeton rendu, rien
-   d'imposé, comme beaucoup de petits serveurs) seulement si un client
-   l'exige (Windows, macOS).
+   (`x.nouveau`, renommage), 64 Mo au plus par fichier. Plus tard,
+   peut-être : écriture au fil de la réception.
+3. **DELETE d'un dossier non vide : toujours refusé par le serveur (409)**,
+   jamais d'effacement récursif sur la Pi. Pierre voulait une validation
+   explicite avec alerte : le serveur ne peut pas en afficher, c'est le
+   client qui confirme. gvfs refuse lui-même d'envoyer DELETE pour un
+   dossier non vide (vérifié au banc : « Répertoire non vide », rien
+   envoyé) ; PCManFM demande « supprimer définitivement ? » puis efface
+   fichier par fichier. Protégés aussi : disquette montée, racine d'un
+   volume, fichiers de démarrage à la racine de la carte
+   (`kernel8-32.img`, `config.txt`, `cmdline.txt`, `bootcode.bin`,
+   `start.elf`, `fixup.dat`) en DELETE et MOVE (source ou destination) ;
+   PUT de `kernel8-32.img` permis.
+4. **LOCK** : non géré (`DAV: 1`, LOCK et UNLOCK → 405) ; `davfs2` avec
+   `use_locks 0`. Faux verrous seulement si un client l'exige.
 5. **Noms** : ASCII imprimable seulement à la création (PUT, MKCOL, MOVE,
-   COPY : refus 400 sinon, noté au journal) ; noms existants en page 850
-   rendus en UTF-8 dans les listes (table de 128 caractères).
+   COPY : 400 sinon, noté au journal) ; noms existants en page 850 rendus
+   en UTF-8 (`ff_oem2uni` de FatFs, pas de table recopiée) et retrouvés
+   depuis l'UTF-8 (`ff_uni2oem`).
+
+## État (22/11/2026)
+
+**Fait** (commits du 22/11/2026), noyau construit :
+
+- Étape 0 : `s_emu` réservé par `calloc` à la première utilisation
+  (`oric_emu ()`, `#define s_emu (*oric_emu ())` : les serveurs du cœur 0
+  peuvent demander si une disquette est montée avant
+  `oric_machine_init`). `_end` passe de ~4 Mo à ~1,4 Mo.
+- `carte.cpp` : `CarteListe` (sortie de `web.cpp`), `CarteInfo`,
+  `CarteEffacer`, `CarteCreerDossier`, `CarteDeplacer`, `CarteCopier`,
+  `CarteEstProtegee`, codes `TCarteCode` (aussi en sortie de
+  `CarteEcrire`). `disquette_montee_sous` (`disquette.c`) pour le
+  déplacement d'un dossier.
+- `dav.cpp` : serveur HTTP/1.1 persistant sur `CSocket`, méthodes du
+  tableau ci-dessous ; 4 connexions au plus, la suivante attend et les
+  connexions inactives se ferment alors (moins d'une seconde) ; tâches
+  comptées avant chaque création (`MAX_TASKS` 20 de Circle : panique
+  au-delà, 3 laissées libres).
+- Entre la carte et une clé : déplacement d'un fichier = copie puis
+  effacement ; d'un dossier : refusé (403). COPY d'un dossier : 403 (gvfs
+  copie fichier par fichier). GET d'un dossier : texte d'aide. PROPPATCH :
+  207 avec un seul refus (403) sans nommer les propriétés.
+
+**Vérifié au banc natif** (`banc-dav/`, `dav.cpp` et `carte.cpp` compilés
+pour Linux, FatFs sur des fichiers POSIX) : `gio mount`, `gio list`
+(racine avec `USB:`, `café.txt` en page 850 affiché en UTF-8, dates),
+`gio copy` dans les deux sens (3 Mo, `cmp` identique), remplacement,
+`mkdir`, `rename` (fichier, dossier), `move`, `remove` ; `curl` pour
+chaque refus (disquette montée : 423 ; protégé : 403 ; dossier non
+vide : 409 ; accent ou « ? » : 400 ; dossier absent : 409 ;
+`Overwrite: F` : 412 ; plus de 64 Mo : 413 avant l'envoi ; « .. » : 400 ;
+`USB2:` absente : 404 ; Depth infinity : 403), PUT par morceaux
+(`chunked`), `Expect: 100-continue`, HEAD, connexions persistantes, 6
+connexions pour 4 places.
+
+**Restent sur la 3B+** : voir « Essais » plus bas (PCManFM, durées,
+journal, son pendant une copie, clé retirée). Non fait : `Range`, faux
+verrous, écriture au fil de la réception, copie récursive côté serveur,
+fichiers de plus de 64 Mo.
+
+Limite connue : FatFs sans verrou des fichiers ouverts (`FF_FS_LOCK 0`) :
+un fichier que l'Oric garde ouvert par l'API de fichiers de LOCI n'est
+pas protégé (Phosphoric ne garde pas leur chemin), comme pour TFTP et la
+page web. Les disquettes montées le sont.
 
 ## Conception
 
@@ -109,9 +153,9 @@ Prérequis fait : lectures et écritures de fichiers par le cœur 2
 | PROPFIND Depth 0/1 | 207 multistatus | liste (CarteReserver + entre deux trames) ; Depth infinity : 403 |
 | GET, HEAD | 200 | `CarteLire` (cœur 2), 64 Mo au plus |
 | PUT | 201 (créé) / 204 (remplacé) ; 423 disquette montée ; 409 dossier absent ; 507 carte pleine | `CarteEcrire` |
-| DELETE | 204 ; 423 ; 403 protégé | `CarteEffacer` |
+| DELETE | 204 ; 423 ; 403 protégé ; 409 dossier non vide | `CarteEffacer` (fichier ou dossier vide) |
 | MKCOL | 201 ; 405 existe ; 409 parent absent | `CarteCreerDossier` |
-| MOVE, COPY | 201 / 204 ; 412 si `Overwrite: F` et cible présente | `CarteDeplacer`, `CarteCopier` |
+| MOVE, COPY | 201 / 204 ; 412 si `Overwrite: F` et cible présente ; 403 : COPY d'un dossier, MOVE d'un dossier entre volumes | `CarteDeplacer`, `CarteCopier` |
 | PROPPATCH | 207, chaque propriété refusée (403) | — |
 | LOCK, UNLOCK | 405 au début (décision 4) | — |
 

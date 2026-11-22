@@ -63,6 +63,10 @@ void oric_machine_shutdown(void);
 bool oric_machine_disk_mounted(const char* path);
 void oric_machine_flush_disks(void);
 
+/* Une disquette montée dans le dossier dir ou plus bas ? (WebDAV, entre
+ * deux trames) */
+bool oric_machine_disk_mounted_under(const char* dir);
+
 /* Compteur des réécritures de disquettes (impair : en cours), lisible de
  * tout cœur : sert à vérifier qu'une lecture faite pendant l'émulation
  * (cœur 2, carte.cpp) n'en a croisé aucune. */

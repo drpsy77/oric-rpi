@@ -1,0 +1,1 @@
+#define FRAME_BUFFER_SIZE 1600

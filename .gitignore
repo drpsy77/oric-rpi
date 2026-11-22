@@ -27,3 +27,6 @@ phosphoric/
 bureau/build/
 bureau/roms/
 sauvegarde/
+
+# Banc natif de dav.cpp (banc-dav/Makefile)
+banc-dav/banc-dav

@@ -34,6 +34,10 @@ void disquette_flush_attente(emulator_t* emu);
  * disquette montée, Microdisc ou LOCI. Émulation entre deux trames. */
 bool disquette_montee(emulator_t* emu, const char* path);
 
+/* Vrai si une disquette montée est dans le dossier dir ou plus bas (même
+ * forme de chemin). Émulation entre deux trames. */
+bool disquette_montee_sous(emulator_t* emu, const char* dir);
+
 /* Compteur des réécritures (impair : une réécriture en cours), lisible
  * depuis n'importe quel cœur : une lecture faite pendant que la valeur est
  * restée la même et paire n'a croisé aucune réécriture. */
