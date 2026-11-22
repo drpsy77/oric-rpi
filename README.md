@@ -161,7 +161,8 @@ Page web de la carte : `web=80` (ou un autre port ; `web=1` vaut 80), avec
 l'état de la machine (température, fréquence, temps par trame, adresse,
 heure, mémoire), la liste des dossiers (disquettes montées signalées), la
 lecture d'un fichier (texte affiché, le reste téléchargé), l'envoi de
-fichiers dans le dossier affiché (4 Mo en tout par envoi, au-delà TFTP) et
+fichiers dans le dossier affiché (20 Mo en tout par envoi, au-delà TFTP ;
+l'Oric s'arrête le temps d'écrire chaque fichier, ~0,4 s par Mo) et
 un bouton Redémarrer (comme Ctrl+Alt+Suppr, après l'envoi d'un noyau).
 Mêmes protections que TFTP (remplacement par renommage, disquette montée
 lisible mais pas remplaçable) ; chaque demande est notée dans le journal.

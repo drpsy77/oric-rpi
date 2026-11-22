@@ -131,9 +131,12 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 - `web=80` (avec `tftp=`, même client ; `web=1` = 80) : page web de la
   carte (`web.cpp`, `CHTTPDaemon`, une tâche du cœur 0 par connexion) :
   `http://oric.local/?d=oric/usb` liste (disquettes montées signalées),
-  `/f/chemin` lecture, `POST /envoi?d=` envoi multipart (4 Mo en tout :
-  CHTTPDaemon garde la requête et la réponse entières en mémoire, tampon de
-  4 Mo réservé par connexion), état de la machine, `POST /redemarrer`
+  `/f/chemin` lecture, `POST /envoi?d=` envoi multipart (20 Mo en tout,
+  `MAX_FICHIERS` : CHTTPDaemon garde la requête entière en mémoire, tampon
+  à sa taille, et la réponse dans un tampon de 4 Mo réservé par connexion ;
+  fichiers écrits un par un, émulation reprise 100 ms entre deux :
+  l'écriture arrête l'Oric ~0,3 à 0,5 s par Mo ; pas de limite de durée,
+  le délai de 30 s ne compte que le silence), état de la machine, `POST /redemarrer`
   (Ctrl+Alt+Suppr 1,5 s plus tard). Clés USB présentes en tête de la
   racine (`/?d=USB:/dSK`). `/l/chemin` : liste en texte (`d`/`f`, taille
   exacte, date, `montee`), refus en une ligne `erreur : ...` avec le code
