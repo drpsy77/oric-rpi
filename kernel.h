@@ -32,7 +32,9 @@ private:
 };
 
 // Cœur 1 : l'émulation, sans interruption (CMultiCoreSupport de Circle,
-// voir doc/multicore.txt). Les cœurs 2 et 3 s'arrêtent tout de suite.
+// voir doc/multicore.txt). Cœur 2 : lectures et écritures de fichiers pour
+// TFTP et la page web (carte.cpp), endormi (WFE) entre deux. Le cœur 3
+// s'arrête tout de suite.
 class CEmuCores : public CMultiCoreSupport
 {
 public:
@@ -73,7 +75,7 @@ private:
 
 	// Réglages : oric.cfg (dossier de lociflash=) d'abord, puis cmdline.txt
 	void ReadSettings (void);
-	static void WaitEmulationIdle (void);	// tâches TFTP et web (cœur 0)
+	static void WaitEmulationIdle (void);	// carte.cpp, TFTP, web (cœur 0)
 	static void WebStatus (class CString *pHTML);	// page web : état
 	static void WebReboot (void);			// page web : redémarrage
 	const char *Option (const char *pName, const char *pDefault = 0);

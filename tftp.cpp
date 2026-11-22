@@ -6,12 +6,12 @@
 // (tftpfatfsfileserver.cpp). Voir SOURCES.md.
 //
 // Le démon est une tâche de l'ordonnanceur du cœur 0 : elle tourne pendant
-// mScheduler.Yield () de la boucle principale, donc parfois pendant que le
-// cœur 1 calcule une trame. Or le cœur 1 utilise la carte SD (disquettes,
-// API fichiers de LOCI) : la carte n'est touchée ici qu'après pWaitIdle,
-// et sans rendre la main (le cœur 0 ne demande pas de trame entre-temps).
-// Un fichier est donc lu ou reçu en entier en mémoire (32 Mo au plus,
-// limite de TFTP sans repli du numéro de bloc), puis écrit d'un coup.
+// mScheduler.Yield () de la boucle principale. Un fichier est lu ou reçu
+// en entier en mémoire (32 Mo au plus, limite de TFTP sans repli du numéro
+// de bloc), puis écrit d'un coup. Lecture et écriture sont faites par le
+// cœur 2 (carte.cpp) pendant que la tâche rend la main : l'Oric continue.
+// Le contrôle « disquette montée » de la demande se fait après pWaitIdle
+// (cœur 1 entre deux trames), sans rendre la main entre-temps.
 //
 // Noms : chemin de la carte (« oric/usb/x.dsk »), ou d'une clé USB de la
 // Pi (« USB:/dSK/x.dsk », « USB2:/... » ; tftp-hpa prend « USB: » pour un
@@ -98,7 +98,7 @@ boolean COricTFTP::IsAccessAllowed (const CIPAddress *pForeignIP,
 	return TRUE;
 }
 
-// Lecture : le fichier entier en mémoire, entre deux trames
+// Lecture : le fichier entier en mémoire, lu par le cœur 2
 boolean COricTFTP::FileOpen (const char *pFileName)
 {
 	Release ();
@@ -107,7 +107,6 @@ boolean COricTFTP::FileOpen (const char *pFileName)
 		return FALSE;
 	}
 
-	(*m_pWaitIdle) ();
 	if (!CarteLire (m_Path, &m_pData, &m_nSize, MAX_FILE_SIZE))
 	{
 		if (m_nSize == 0)
@@ -201,8 +200,7 @@ void COricTFTP::UpdateStatus (TStatus Status, const char *pFileName)
 	case StatusWriteCompleted:
 		if (m_bWriting)
 		{
-			// entre deux trames, sans rendre la main
-			(*m_pWaitIdle) ();
+			// par le cœur 2, la fin entre deux trames (carte.cpp)
 			CarteEcrire (m_Path, m_pData, m_nSize, "TFTP");
 			Release ();
 		}

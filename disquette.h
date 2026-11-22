@@ -28,4 +28,9 @@ void disquette_flush(emulator_t* emu);
  * disquette montée, Microdisc ou LOCI. Émulation entre deux trames. */
 bool disquette_montee(emulator_t* emu, const char* path);
 
+/* Compteur des réécritures (impair : une réécriture en cours), lisible
+ * depuis n'importe quel cœur : une lecture faite pendant que la valeur est
+ * restée la même et paire n'a croisé aucune réécriture. */
+unsigned disquette_reecritures(void);
+
 #endif /* DISQUETTE_H */

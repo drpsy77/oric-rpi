@@ -78,6 +78,7 @@
 #include "mdns.h"
 #include "web.h"
 #include "cles.h"
+#include "carte.h"
 
 #include <circle/bcmpropertytags.h>
 #include <circle/machineinfo.h>
@@ -118,6 +119,10 @@ void CEmuCores::Run (unsigned nCore)
 	if (nCore == 1)
 	{
 		m_pKernel->RunEmulation ();
+	}
+	else if (nCore == 2)
+	{
+		CarteCoeur2 ();		// fichiers de TFTP et de la page web (carte.cpp)
 	}
 }
 
@@ -421,6 +426,9 @@ void CKernel::UpdateNetwork (void)
 	// mDNS : la Pi répond au nom de nom= (oric.local) et trouve les autres
 	// noms en .local (tftp=, ATDT et HOSTS du modem) ; une tâche du cœur 0
 	m_pMDNS = new COricMDNS (&mNet, Option ("nom", "oric"));
+
+	// Lectures et écritures de TFTP et de la page web : cœur 2 (carte.cpp)
+	CarteInitialiser (WaitEmulationIdle);
 
 	// Serveur TFTP : une tâche du cœur 0 aussi
 	if (m_bTFTP)
@@ -800,6 +808,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			{
 				m_pSound->Cancel ();
 			}
+			CarteCoeur2Attendre ();		// fichier en cours (TFTP, page web)
 			oric_machine_shutdown ();
 			JournalPrintf (m_bHaltRequest ? "Arret (Ctrl+Alt+Fin)\n"
 						      : "Redemarrage (Ctrl+Alt+Suppr ou page web)\n");
@@ -1009,6 +1018,13 @@ void CKernel::StartSound (void)
 // les clés USB suivent le même chemin (cles.cpp)
 void CKernel::UpdateKeyboard (void)
 {
+	// Le cœur 2 lit ou écrit une clé (TFTP, page web) : son retrait
+	// libérerait le périphérique sous ses pieds ; repris après le fichier
+	if (CarteCoeur2SurCle ())
+	{
+		return;
+	}
+
 	boolean bUpdated = mUSBHCI.UpdatePlugAndPlay ();
 	if (bUpdated)
 	{

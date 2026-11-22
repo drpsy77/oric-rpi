@@ -114,9 +114,10 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 - `tftp=cyberlab.local` (nom ou adresse) : serveur TFTP de toute la carte
   (`tftp.cpp`), pour ce client seulement (nom résolu à nouveau quand une
   autre adresse se présente) ; démarre le réseau même sans modem. Fichiers lus
-  ou reçus en entier en mémoire (32 Mo au plus), carte touchée seulement
-  quand le cœur 1 est entre deux trames (`WaitEmulationIdle`, sans rendre la
-  main) ; fichier reçu écrit en `x.nouveau`, l'ancien renommé `x.ancien`
+  ou reçus en entier en mémoire (32 Mo au plus), lus et écrits par le
+  cœur 2 (`carte.cpp`, l'Oric continue) ; contrôles et renommages quand le
+  cœur 1 est entre deux trames (`WaitEmulationIdle`, sans rendre la main) ;
+  fichier reçu écrit en `x.nouveau`, l'ancien renommé `x.ancien`
   puis effacé. Disquette montée (Microdisc ou LOCI,
   `oric_machine_disk_mounted`) : lecture permise (pistes en attente
   réécrites avant), remplacement refusé. Nouveau noyau : Ctrl+Alt+Suppr.
@@ -134,8 +135,7 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   `/f/chemin` lecture, `POST /envoi?d=` envoi multipart (20 Mo en tout,
   `MAX_FICHIERS` : CHTTPDaemon garde la requête entière en mémoire, tampon
   à sa taille, et la réponse dans un tampon de 4 Mo réservé par connexion ;
-  fichiers écrits un par un, émulation reprise 100 ms entre deux :
-  l'écriture arrête l'Oric ~0,3 à 0,5 s par Mo ; pas de limite de durée,
+  fichiers écrits un par un par le cœur 2 ; pas de limite de durée,
   le délai de 30 s ne compte que le silence), état de la machine, `POST /redemarrer`
   (Ctrl+Alt+Suppr 1,5 s plus tard). Clés USB présentes en tête de la
   racine (`/?d=USB:/dSK`). `/l/chemin` : liste en texte (`d`/`f`, taille
@@ -194,7 +194,7 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
 
 | Fichier | Rôle |
 |---|---|
-| `kernel.cpp/.h` | cœur 0 : clavier et souris USB, son HDMI, réseau (Wi-Fi ou Ethernet), température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) |
+| `kernel.cpp/.h` | cœur 0 : clavier et souris USB, son HDMI, réseau (Wi-Fi ou Ethernet), température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) ; cœur 2 : `CarteCoeur2` |
 | `oric_machine.c/.h` | colle extraite de `main.c` de Phosphoric, API C opaque |
 | `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture), cœur 1 entre deux trames |
 | `locidisk.c/.h` | `locidisk=0:/x.dsk` : A: de LOCI monté, XRAM du menu, démarrage direct (comme le menu puis Échap) |
@@ -203,7 +203,7 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
 | `tftp.cpp/.h` | serveur TFTP de la carte SD (`tftp=`), tâche du cœur 0 |
 | `web.cpp/.h` | page web de la carte (`web=`) : liste, lecture, envoi, état, redémarrage |
 | `cles.cpp/.h` | clés USB de la Pi (umsd1/2 → `USB:`, `USB2:`) servies par LOCI : branchement et retrait à chaud, `statvfs` des volumes |
-| `carte.cpp/.h` | accès réseau à la carte, commun à TFTP et web (client, renommage, disquettes montées) |
+| `carte.cpp/.h` | accès réseau à la carte, commun à TFTP et web (client, renommage, disquettes montées) ; lectures et écritures par le cœur 2 |
 | `mdns.cpp/.h` | mDNS : `nom.local` de la Pi, noms en `.local` des autres machines |
 | `phosphoric_stubs.c`, `newlib_compat.c`, `compat/ifaddrs.h` | cartes absentes ; `access`, `popen`, `getifaddrs` |
 | `main.cpp` | copie circle-stdlib |
@@ -253,6 +253,22 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   trames par paires puis un trou (saccades). Écran en 50 Hz : `hdmi_group=1`,
   `hdmi_mode=31` dans `config.txt`. Le cœur 0
   n'utilise la carte SD (journal, F12) qu'entre deux trames.
+- **Cœur 2** (`carte.cpp`) : lit et écrit les fichiers de TFTP et de la
+  page web (case de travail, un travail à la fois ; `WFE` entre deux,
+  réveil par `SEV` du cœur 0, dont la tâche rend la main en attendant).
+  FatFs seulement (`f_*`, pas de stdio ni de journal), par morceaux de
+  64 Ko (`CARTE_MORCEAU`) : verrou de volume de FatFs (`FF_FS_REENTRANT 1`,
+  verrou tournant de Circle, sans couper les interruptions) rendu entre
+  deux. `malloc` de Circle (noms longs de FatFs) : verrou du tas. Piège :
+  `diskio.cpp` de Circle copie un tampon non aligné sur 4 octets dans
+  **un tampon statique commun à tous les volumes**, sans verrou ; le cœur 2
+  passe donc par son propre tampon aligné (`s_Morceau`) ; ceux de FatFs
+  (`FATFS.win`, `FIL.buf`) sont alignés. Disquette montée lue par le
+  cœur 2 : compteur de réécritures de `disquette.c` relu après, relue si
+  le cœur 1 l'a réécrite pendant ce temps (au 3ᵉ essai, entre deux
+  trames). Branchements USB reportés pendant un travail sur une clé
+  (`CarteCoeur2SurCle`) ; arrêt et redémarrage attendent la fin du travail
+  (`CarteCoeur2Attendre`).
 - **Ordonnanceur** : `CStdlibAppNetwork` crée un `CScheduler`, cœur 0
   seulement. circle-newlib y rend la main dans les sockets **et dans
   `_close`** : d'où `netrelay.cpp`, qui exécute ces appels du cœur 1 sur le
@@ -505,13 +521,14 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`
    déjà lié) ; LED d'activité pendant la réécriture des disquettes.
 14. **Accès réseau à la carte par le cœur 2** (accord de Pierre,
-   22/11/2026, à faire) : TFTP et la page web arrêtent l'Oric pendant
+   22/11/2026) : TFTP et la page web arrêtaient l'Oric pendant
    chaque accès à la carte (`WaitEmulationIdle` sans rendre la main :
-   ~0,25 à 0,5 s par Mo écrit). Le cœur 2 (libre) ferait les lectures et
-   l'écriture de `x.nouveau` par morceaux de 64 Ko, sous le verrou de
-   FatFs déjà présent dans Circle (`FF_FS_REENTRANT 1`) ; le protocole
-   reste sur le cœur 0 (pile TCP/IP), la fin d'écriture (contrôles,
-   renommages) entre deux trames. Plan : `docs/plan-coeur2-carte.md`.
+   ~0,25 à 0,5 s par Mo écrit). **Fait (22/11/2026), à essayer sur la
+   3B+** : le cœur 2 fait les lectures et l'écriture de `x.nouveau` par
+   morceaux de 64 Ko (voir Points techniques) ; le protocole reste sur le
+   cœur 0 (pile TCP/IP), la fin d'écriture (contrôles, renommages) entre
+   deux trames ; `PAUSE_MS` de `web.cpp` retiré. Listes encore entre deux
+   trames. Plan et essais : `docs/plan-coeur2-carte.md`.
    Ensuite : serveur **WebDAV** (`dav://oric.local/` dans PCManFM par
    gvfs, `davfs2` pour un point de montage ; effacer, renommer, dossiers),
    préféré à 9P, NFS et SMB.

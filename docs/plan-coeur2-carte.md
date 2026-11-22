@@ -1,6 +1,10 @@
 # Plan : accès réseau à la carte par le cœur 2 (accord de Pierre, 22/11/2026)
 
-À faire dans une nouvelle conversation. But : plus de gel de l'Oric quand
+**Fait le 22/11/2026 (étapes 2 à 5 de « Ordre proposé »), à essayer sur la
+3B+** : voir « Réalisation » à la fin. L'étape 1 (mesure de la lecture
+avant) n'a pas été faite : la comparaison se fera sur le journal.
+
+But : plus de gel de l'Oric quand
 on lit ou écrit la carte SD (ou une clé USB de la Pi) par le réseau (TFTP,
 page web, puis un futur serveur WebDAV). Première étape avant WebDAV
 (`dav://oric.local/` dans PCManFM, `davfs2`), qui ferait passer beaucoup
@@ -148,3 +152,40 @@ Pas de banc natif possible (Circle) : `make` seulement sur la RPI 400.
 - Session longue (vitrine REMOTE plusieurs heures) avec des transferts de
   temps en temps : stabilité, température (le cœur 2 doit dormir quand il
   n'a rien à faire).
+
+## Réalisation (22/11/2026)
+
+- `carte.cpp` : case de travail `s_Travail` (`EtatLibre` → `EtatDemande`
+  → `EtatFini`), prise par une tâche du cœur 0 (`Prendre`, `Rendre` :
+  `s_bOccupee`, les autres tâches attendent en rendant la main) ;
+  `CarteCoeur2` (appelé par `CEmuCores::Run (2)`) dort en `WFE`, réveillé
+  par `SEV`. `CARTE_MORCEAU` = 64 Ko.
+- Trouvé en lisant Circle : `diskio.cpp` (FatFs) recopie un tampon non
+  aligné sur 4 octets dans un **tampon statique commun à tous les
+  volumes, sans verrou** (et le réalloue s'il est trop petit). Le cœur 1
+  (stdio de Phosphoric) peut y passer sur la carte pendant que le cœur 2
+  lit une clé, ou l'inverse. Le cœur 2 copie donc lui-même par morceaux
+  dans `s_Morceau` (aligné) quand le tampon de l'appelant ne l'est pas
+  (fichiers d'un envoi multipart). `FATFS.win` (336) et `FIL.buf` (80)
+  sont alignés : vérifié avec `offsetof` et le `ffconf.h` du port (exFAT).
+- `malloc` lié : celui de Circle (`alloc.o`, `CHeapAllocator` avec verrou
+  tournant) : FatFs peut réserver ses tampons de noms longs depuis le
+  cœur 2.
+- Verrou de volume de FatFs : `CGenericLock` → `CSpinLock (TASK_LEVEL)`,
+  n'arrête pas les interruptions : le cœur 0 peut attendre ce verrou sans
+  bloquer l'interruption de la carte ou de l'USB dont le cœur 2 a besoin.
+- Lecture : `Lecture` (commune à `CarteLire` et `CarteLireDans`) ; avec
+  `CarteLire`, un premier travail donne la taille, le tampon est réservé
+  par le cœur 0, puis lu. Disquette montée : `oric_machine_flush_disks`
+  entre deux trames, puis compteur `disquette_reecritures` (+1 avant et
+  après chaque réécriture du cœur 1) relu après la lecture ; changé ou
+  impair : relue, et au 3ᵉ essai lue sur le cœur 0 entre deux trames.
+- Écriture : `CarteEcrire` refuse d'abord (disquette montée, clé absente),
+  fait écrire `x.nouveau` au cœur 2, puis entre deux trames refait les
+  contrôles (clé : même `nBranchement`) avant les renommages ; refus :
+  `x.nouveau` effacé.
+- `UpdateKeyboard` ne fait rien tant que `CarteCoeur2SurCle` ; Ctrl+Alt+Suppr,
+  Ctrl+Alt+Fin et la page web attendent `CarteCoeur2Attendre` avant
+  `oric_machine_shutdown`.
+- Inchangé : listes (`/l/`, `/?d=`) et `f_stat` de `/f/`, entre deux trames
+  sur le cœur 0 ; contrôle « disquette montée » de la demande TFTP.

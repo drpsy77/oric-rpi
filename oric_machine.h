@@ -62,6 +62,11 @@ void oric_machine_shutdown(void);
 bool oric_machine_disk_mounted(const char* path);
 void oric_machine_flush_disks(void);
 
+/* Compteur des réécritures de disquettes (impair : en cours), lisible de
+ * tout cœur : sert à vérifier qu'une lecture faite pendant l'émulation
+ * (cœur 2, carte.cpp) n'en a croisé aucune. */
+unsigned oric_machine_disk_writes(void);
+
 /* Clé USB key (0, 1) branchée ou retirée (cœur 0, entre deux trames) :
  * nouveau texte dans la liste des périphériques de LOCI (sans « N: »).
  * Numéro « N: » de la clé, 0 si elle n'est pas servie. */

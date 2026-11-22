@@ -26,26 +26,25 @@
 // autre réponse par sa page générique (« Not Found »), sans le message.
 //
 // Comme le serveur TFTP : chaque connexion est une tâche de l'ordonnanceur
-// du cœur 0, qui ne touche la carte qu'après WaitIdle (cœur 1 entre deux
-// trames) et sans rendre la main entre-temps ; seul le client de tftp= est
-// servi ; une disquette montée peut être lue, pas remplacée ; un fichier
-// reçu remplace l'ancien par renommage (carte.cpp).
+// du cœur 0 ; les fichiers sont lus et écrits par le cœur 2 pendant que la
+// tâche rend la main (carte.cpp : l'Oric continue) ; listes, état et
+// contrôles après WaitIdle (cœur 1 entre deux trames), sans rendre la main
+// entre-temps ; seul le client de tftp= est servi ; une disquette montée
+// peut être lue, pas remplacée ; un fichier reçu remplace l'ancien par
+// renommage (carte.cpp).
 //
 // CHTTPDaemon prépare chaque réponse en entier en mémoire, dans un tampon
 // réservé à la création de chaque connexion (MAX_CONTENU), et reçoit un
 // envoi en entier avant de l'écrire (MAX_ENVOI, tampon à la taille de
 // l'envoi, réservé seulement pendant celui-ci) : plus gros, passer par TFTP
 // (32 Mo par fichier). Pas de limite de durée : DELAI_S ne compte que le
-// silence. Les fichiers d'un envoi sont écrits un par un, l'émulation
-// reprenant entre deux (PAUSE_MS) : l'Oric s'arrête le temps d'écrire un
-// fichier (~0,3 à 0,5 s par Mo sur la 3B+), pas celui de tout l'envoi.
+// silence. Les fichiers d'un envoi sont écrits un par un par le cœur 2.
 //
 #include "web.h"
 #include "cles.h"
 #include "journal.h"
 #include "oric_machine.h"
 
-#include <circle/sched/scheduler.h>
 #include <fatfs/ff.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -56,7 +55,6 @@
 #define MAX_CONTENU	(4u << 20)		// fichier lu, page
 #define MAX_FICHIERS	(20u << 20)		// fichiers envoyés en une fois
 #define MAX_ENVOI	(MAX_FICHIERS + 65536)	// avec les en-têtes du formulaire
-#define PAUSE_MS	100			// émulation entre deux fichiers écrits
 #define MAX_ENTREES	1000			// lignes d'un dossier
 #define DELAI_S		30			// réception sans nouvelles : abandon
 
@@ -787,7 +785,6 @@ THTTPStatus COricWeb::Envoi (const char *pDossier, CPage *pPage)
 	pPage->Texte ("<h1>Envoi</h1><section><table>");
 
 	unsigned nFichiers = 0;
-	bool bEcrit = false;			// un fichier déjà écrit : pause avant le suivant
 	const char *pEntete;
 	const u8 *pDonnees;
 	unsigned nTaille;
@@ -831,16 +828,8 @@ THTTPStatus COricWeb::Envoi (const char *pDossier, CPage *pPage)
 		}
 		else
 		{
-			// Fichier précédent écrit : l'émulation reprend quelques trames
-			// (le tampon de l'envoi reste à cette tâche), puis de nouveau
-			// entre deux trames, sans rendre la main pendant l'écriture
-			if (bEcrit)
-			{
-				CScheduler::Get ()->MsSleep (PAUSE_MS);
-			}
-			(*m_pHooks->WaitIdle) ();
+			// par le cœur 2 (le tampon de l'envoi reste à cette tâche)
 			CarteEcrire (Chemin, pDonnees, nTaille, "Web", Resultat, sizeof Resultat);
-			bEcrit = true;
 		}
 		pPage->Texte ("<tr><td>");
 		pPage->HTML (pBase);

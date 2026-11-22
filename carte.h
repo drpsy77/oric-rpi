@@ -5,9 +5,12 @@
 // (tftp=), noms de fichiers, lecture d'un fichier entier, remplacement
 // d'un fichier sans le laisser à moitié écrit.
 //
-// Toutes ces fonctions touchent la carte SD : elles ne s'appellent que
-// depuis une tâche du cœur 0, après pWaitIdle (cœur 1 entre deux trames),
-// sans rendre la main à l'ordonnanceur entre-temps.
+// Elles s'appellent depuis une tâche du cœur 0. Le gros d'une lecture ou
+// d'une écriture (CarteLire, CarteLireDans, CarteEcrire) est fait par le
+// cœur 2, pendant que la tâche rend la main : l'émulation continue. Le
+// reste (disquette montée ? renommages) est fait entre deux trames, par
+// l'attente donnée à CarteInitialiser. CarteChemin, CarteRelatif : pas
+// d'accès à la carte.
 //
 #ifndef _carte_h
 #define _carte_h
@@ -17,6 +20,21 @@
 #include <circle/types.h>
 
 #define CARTE_MAX_CHEMIN	300		// « SD:/ » ou « USB2:/ » + nom
+
+// Cœur 0, au démarrage : pAttenteTrame rend la main quand le cœur 1 est
+// entre deux trames (il y reste tant que la tâche ne rend pas la main).
+void CarteInitialiser (void (*pAttenteTrame) (void));
+
+// Cœur 2 : exécute les lectures et écritures demandées, dort (WFE) entre
+// deux. Ne revient jamais.
+void CarteCoeur2 (void);
+
+// Cœur 0 : un travail du cœur 2 en cours sur une clé USB ? (branchements
+// reportés : le retrait libère le périphérique qu'il lit)
+bool CarteCoeur2SurCle (void);
+
+// Cœur 0, arrêt ou redémarrage : attend la fin du travail en cours
+void CarteCoeur2Attendre (void);
 
 // Seul client autorisé : adresse ou nom (cyberlab.local par mDNS, sinon DNS
 // de la box), résolu à nouveau si une autre adresse se présente (bail DHCP
@@ -59,8 +77,9 @@ bool CarteChemin (const char *pNom, char *pChemin, unsigned nTaille, bool bDossi
 // racine) ; « USB:/dSK » → « USB:/dSK », « USB:/ » → « USB: » (clé)
 void CarteRelatif (const char *pChemin, char *pRelatif, unsigned nTaille);
 
-// Fichier entier en mémoire (malloc, à libérer par free) ; pistes en attente
-// réécrites avant si c'est une disquette montée. Faux si absent, illisible
+// Fichier entier en mémoire (malloc, à libérer par free), lu par le cœur 2 ;
+// pistes en attente réécrites avant si c'est une disquette montée (relue si
+// le cœur 1 la réécrit pendant la lecture). Faux si absent, illisible
 // ou plus grand que nMax (*pTaille dit alors sa taille, 0 si absent).
 bool CarteLire (const char *pChemin, u8 **ppDonnees, unsigned *pTaille, unsigned nMax);
 
@@ -68,9 +87,10 @@ bool CarteLire (const char *pChemin, u8 **ppDonnees, unsigned *pTaille, unsigned
 // du fichier en sortie (0 si absent) ; faux s'il n'y tient pas.
 bool CarteLireDans (const char *pChemin, u8 *pTampon, unsigned *pTaille);
 
-// Remplace (ou crée) pChemin : écrit sous « x.nouveau », l'ancien devient
-// « x.ancien », le nouveau prend son nom, l'ancien est effacé. Refusé pour
-// une disquette montée. Résultat dans le journal (préfixe pService) et,
+// Remplace (ou crée) pChemin : écrit sous « x.nouveau » par le cœur 2, puis,
+// entre deux trames, l'ancien devient « x.ancien », le nouveau prend son
+// nom, l'ancien est effacé. Refusé pour une disquette montée (vérifié avant
+// et après l'écriture de « x.nouveau » : LOCI a pu la monter entre-temps). Résultat dans le journal (préfixe pService) et,
 // en clair, dans pMessage (peut être 0).
 bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 		  const char *pService, char *pMessage = 0, unsigned nMessage = 0);

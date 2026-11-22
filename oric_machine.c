@@ -711,6 +711,12 @@ void oric_machine_flush_disks(void) {
     disquette_flush(&s_emu);
 }
 
+/* [port] Lecture d'une disquette montée par le cœur 2 (carte.cpp) :
+ * réécritures du cœur 1 entre-temps ? (disquette.c) */
+unsigned oric_machine_disk_writes(void) {
+    return disquette_reecritures();
+}
+
 /* [port] Texte d'une clé dans la liste des périphériques de LOCI
  * (op_readdir_dev, « N: status » comme loci_add_usb_device). Appelé
  * entre deux trames : le cœur 1 ne lit pas la liste en même temps. */

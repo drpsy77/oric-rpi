@@ -62,6 +62,10 @@ static copie_t s_loci[NB_LECTEURS], s_microdisc[NB_LECTEURS];
 static const char* s_microdisc_path[NB_LECTEURS];
 static int s_calme = -1;        /* trames depuis la dernière écriture ; -1 : rien */
 static int s_attente;           /* trames depuis le dernier essai (clé absente) */
+/* Réécritures sur la carte : +1 avant, +1 après (impair : en cours). Lu par
+ * le cœur 0 (carte.cpp) autour d'une lecture du cœur 2 : une disquette
+ * montée réécrite pendant qu'il la lit est relue. */
+static volatile unsigned s_reecritures;
 
 void disquette_set_microdisc_path(int drive, const char* path) {
     if (drive >= 0 && drive < NB_LECTEURS) s_microdisc_path[drive] = path;
@@ -194,6 +198,7 @@ static void sauver(copie_t* c, const uint8_t* image, uint32_t size, const char* 
     FILE* fp = NULL;
     int n = 0;
     bool echec = false;
+    bool compte = false;        /* s_reecritures déjà augmenté */
     for (uint32_t k = 0; k < size / piste; k++) {
         uint32_t off = k * piste;
         if (memcmp(image + off, f->data + off, piste) == 0) continue;
@@ -211,11 +216,20 @@ static void sauver(copie_t* c, const uint8_t* image, uint32_t size, const char* 
             len = MFM_TRACK_SIZE;
         }
 
+        if (!compte) {
+            compte = true;
+            s_reecritures++;
+            __sync_synchronize();
+        }
         if (!fp && !(fp = fopen(path, "r+b"))) { echec = true; break; }
         if (fseek(fp, pos, SEEK_SET) != 0 || fwrite(bloc, 1, len, fp) != len) { echec = true; break; }
         n++;
     }
     if (fp && fclose(fp) != 0) echec = true;
+    if (compte) {
+        __sync_synchronize();
+        s_reecritures++;
+    }
 
     if (echec) {
         /* fichier dans un état inconnu : relu à la prochaine réécriture ;
@@ -304,6 +318,11 @@ bool disquette_montee(emulator_t* emu, const char* path) {
         }
     }
     return false;
+}
+
+unsigned disquette_reecritures(void) {
+    __sync_synchronize();
+    return s_reecritures;
 }
 
 void disquette_flush(emulator_t* emu) {

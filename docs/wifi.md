@@ -85,8 +85,9 @@ la fenêtre TCP retient l'émetteur.
    (port 2324) : fait. La vitrine tourne plusieurs jours de suite ; une
    coupure TCP est rattrapée par le rappel automatique de REMOTE (CP/A).
 5. Serveur TFTP de la carte SD (`tftp=<nom ou adresse du client>`, `tftp.cpp`) :
-   tâche du cœur 0 (`CTFTPDaemon` de Circle), qui ne touche la carte
-   qu'entre deux trames ; démarre le Wi-Fi même sans modem.
+   tâche du cœur 0 (`CTFTPDaemon` de Circle) ; fichiers lus et écrits par
+   le cœur 2 (`carte.cpp`), contrôles et renommages entre deux trames ;
+   démarre le Wi-Fi même sans modem.
 6. mDNS (`mdns.cpp`) : la Pi répond à `oric.local` (`nom=`) ; les noms en
    `.local` (tftp=, ATDT, `HOSTS`) sont cherchés en multicast, le DNS de la
    box ne les connaissant pas.
