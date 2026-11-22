@@ -266,9 +266,14 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   (`FATFS.win`, `FIL.buf`) sont alignés. Disquette montée lue par le
   cœur 2 : compteur de réécritures de `disquette.c` relu après, relue si
   le cœur 1 l'a réécrite pendant ce temps (au 3ᵉ essai, entre deux
-  trames). Branchements USB reportés pendant un travail sur une clé
-  (`CarteCoeur2SurCle`) ; arrêt et redémarrage attendent la fin du travail
-  (`CarteCoeur2Attendre`).
+  trames) ; avant, pistes en attente seulement réécrites
+  (`disquette_flush_attente` : `disquette_flush` chargerait 1 Mo pour
+  comparer). Listes et `f_stat` de la page web : `CarteReserver` (fin du
+  travail du cœur 2 attendue en rendant la main) puis entre deux trames ;
+  sinon chaque appel de FatFs y attend un morceau du cœur 2. `x.ancien`
+  effacé par le cœur 2. Branchements USB reportés pendant un travail sur
+  une clé (`CarteCoeur2SurCle`) ; arrêt et redémarrage attendent la fin du
+  travail (`CarteCoeur2Attendre`).
 - **Ordonnanceur** : `CStdlibAppNetwork` crée un `CScheduler`, cœur 0
   seulement. circle-newlib y rend la main dans les sockets **et dans
   `_close`** : d'où `netrelay.cpp`, qui exécute ces appels du cœur 1 sur le
@@ -534,8 +539,12 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    3B+** : le cœur 2 fait les lectures et l'écriture de `x.nouveau` par
    morceaux de 64 Ko (voir Points techniques) ; le protocole reste sur le
    cœur 0 (pile TCP/IP), la fin d'écriture (contrôles, renommages) entre
-   deux trames ; `PAUSE_MS` de `web.cpp` retiré. Listes encore entre deux
-   trames. Plan et essais : `docs/plan-coeur2-carte.md`.
+   deux trames ; `PAUSE_MS` de `web.cpp` retiré. **Essais par le réseau
+   faits (22/11/2026)** : lectures sans arrêt, envoi par TFTP ~30 ms par
+   fichier (renommages), page web ~38 ms de plus par Mo
+   (`GetMultipartFormPart` de Circle, cœur 0). Restent les essais de
+   Pierre (son, CP/A, clé retirée, Ctrl+Alt+Suppr pendant un envoi) et
+   `oric/loci/montee.dsk` à effacer : `docs/plan-coeur2-carte.md`.
    Ensuite : serveur **WebDAV** (`dav://oric.local/` dans PCManFM par
    gvfs, `davfs2` pour un point de montage ; effacer, renommer, dossiers),
    préféré à 9P, NFS et SMB.

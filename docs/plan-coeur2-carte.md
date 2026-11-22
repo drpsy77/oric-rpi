@@ -189,3 +189,54 @@ Pas de banc natif possible (Circle) : `make` seulement sur la RPI 400.
   `oric_machine_shutdown`.
 - Inchangé : listes (`/l/`, `/?d=`) et `f_stat` de `/f/`, entre deux trames
   sur le cœur 0 ; contrôle « disquette montée » de la demande TFTP.
+
+## Essais par le réseau (22/11/2026, depuis la RPI 400, Ethernet)
+
+Retards relevés dans le journal (« Coeur 0 : trame en retard »). Un arrêt
+de N ms donne une ligne de N ms puis quelques lignes décroissantes (trames
+de rattrapage) : seule la première compte.
+
+| Essai | Avant le cœur 2 | Cœur 2 |
+|---|---|---|
+| 12 `.dsk` (1 Mo) lus par TFTP | gel par fichier (non mesuré) | aucun (un seul de 42 ms : journal) |
+| 12 `.dsk` envoyés par `carte.sh` (TFTP + `/l/`) | ~0,25 à 0,5 s par fichier | 185 à 374 ms, puis 40-50 ms, puis 26-38 ms (corrections ci-dessous) |
+| 12 `.dsk` en un envoi par la page web | idem | ~38 ms + ~30 ms par fichier |
+| 1ʳᵉ lecture d'une disquette montée | ~0,5 s | 527 ms, puis aucun (correction ci-dessous) |
+
+Contenus relus identiques (cmp) ; envoi d'une disquette montée refusé
+(« Access violation »).
+
+Corrections faites pendant les essais :
+
+- **Listes pendant une écriture** : `carte.sh envoyer` vérifie chaque
+  envoi par `/l/` dès le dernier bloc acquitté, donc pendant que le cœur 2
+  écrit. La liste (entre deux trames) attendait le verrou de FatFs à
+  chaque entrée, un morceau de 64 Ko à chaque fois : 185 à 374 ms. Les
+  listes et le `f_stat` de `/f/` attendent maintenant la fin du travail
+  du cœur 2 en rendant la main (`CarteReserver`, `CarteLiberer`).
+- **`x.ancien` effacé par le cœur 2** (FAT réécrite) : la fin d'écriture
+  entre deux trames (deux renommages) passe de 40-50 à 26-38 ms.
+- **Disquette montée** : `oric_machine_flush_disks` appelait
+  `disquette_flush`, qui charge chaque disquette jamais réécrite pour la
+  comparer à l'image (~0,5 s par Mo, émulation arrêtée) ; maintenant
+  `disquette_flush_attente`, seulement si des pistes attendent.
+
+Reste :
+
+- Page web : ~38 ms par Mo envoyé, sur le cœur 0, dans
+  `CHTTPDaemon::GetMultipartFormPart` de Circle (`Search` : `memcmp` à
+  chaque octet pour trouver la frontière ; privée, ni remplaçable ni
+  détournable par `--wrap`, appel interne à `httpdaemon.o`). TFTP n'a pas
+  ce coût ; WebDAV (`PUT`, corps brut) non plus. À signaler à Circle
+  (`memchr` sur le premier octet, ou recherche de Boyer-Moore).
+- Renommages entre deux trames : ~30 ms par fichier écrit (latence de la
+  carte), gardés là pour que le contrôle « disquette montée » et le
+  renommage ne puissent pas être séparés par un montage de LOCI.
+- Essais qui demandent Pierre : son pendant un envoi (oreille), CP/A
+  (`DIR`, copies sur `oric/usb` pendant un envoi), disquette écrite par
+  l'Oric puis lue aussitôt (pistes en attente), clé USB retirée pendant un
+  envoi, Ctrl+Alt+Suppr pendant un envoi, session longue, lecture de
+  20 Mo (pas de fichier de cette taille sur la carte).
+- **À effacer à la main** (erreur de manipulation pendant les essais) :
+  `oric/loci/montee.dsk`, copie de `cpa-en.dsk` (ni TFTP ni la page web
+  n'effacent).

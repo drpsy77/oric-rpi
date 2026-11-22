@@ -183,7 +183,8 @@ enum TEtat
 enum TOperation
 {
 	OpLire,
-	OpEcrire
+	OpEcrire,
+	OpEffacer
 };
 
 enum TResultat
@@ -200,7 +201,7 @@ struct TTravail
 {
 	volatile unsigned nEtat;	// TEtat
 	TOperation Operation;
-	const char *pChemin;		// lire : le fichier ; écrire : « x.nouveau »
+	const char *pChemin;		// lire, effacer : le fichier ; écrire : « x.nouveau »
 	u8 *pTampon;			// lire : 0 pour la taille seulement
 	unsigned nTaille;		// lire : taille du tampon ; écrire : des données
 	TResultat Resultat;
@@ -322,13 +323,19 @@ static void Ecrire (TTravail *t)
 
 static void Executer (TTravail *t)
 {
-	if (t->Operation == OpLire)
+	switch (t->Operation)
 	{
+	case OpLire:
 		Lire (t);
-	}
-	else
-	{
+		break;
+
+	case OpEcrire:
 		Ecrire (t);
+		break;
+
+	case OpEffacer:
+		t->Resultat = f_unlink (t->pChemin) == FR_OK ? ResultatOK : ResultatEcriture;
+		break;
 	}
 }
 
@@ -378,6 +385,16 @@ static void Prendre (void)
 static void Rendre (void)
 {
 	s_bOccupee = false;
+}
+
+void CarteReserver (void)
+{
+	Prendre ();
+}
+
+void CarteLiberer (void)
+{
+	Rendre ();
 }
 
 // Travail de la case exécuté par le cœur 2 (la tâche rend la main en
@@ -607,7 +624,11 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 	}
 	if (bExists)
 	{
-		f_unlink (Old);
+		// L'ancien effacé par le cœur 2 (FAT réécrite : ~1/3 de la fin
+		// d'écriture), l'émulation reprise ; LOCI ne monte pas « x.ancien »
+		t->Operation = OpEffacer;
+		t->pChemin = Old;
+		Faire (true);
 	}
 	Rendre ();
 

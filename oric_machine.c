@@ -708,7 +708,7 @@ bool oric_machine_disk_mounted(const char* path) {
 }
 
 void oric_machine_flush_disks(void) {
-    disquette_flush(&s_emu);
+    disquette_flush_attente(&s_emu);
 }
 
 /* [port] Lecture d'une disquette montée par le cœur 2 (carte.cpp) :

@@ -320,6 +320,13 @@ bool disquette_montee(emulator_t* emu, const char* path) {
     return false;
 }
 
+void disquette_flush_attente(emulator_t* emu) {
+    bool attente = s_calme >= 0;
+    for (int d = 0; d < NB_LECTEURS; d++)
+        attente = attente || s_loci[d].attente || s_microdisc[d].attente;
+    if (attente) disquette_flush(emu);
+}
+
 unsigned disquette_reecritures(void) {
     __sync_synchronize();
     return s_reecritures;

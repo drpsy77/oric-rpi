@@ -36,6 +36,15 @@ bool CarteCoeur2SurCle (void);
 // Cœur 0, arrêt ou redémarrage : attend la fin du travail en cours
 void CarteCoeur2Attendre (void);
 
+// Tâche du cœur 0 qui accède elle-même à la carte entre deux trames (listes
+// de la page web) : CarteReserver attend, en rendant la main, la fin du
+// travail du cœur 2 et en empêche un autre jusqu'à CarteLiberer. Sans cela,
+// chaque appel de FatFs attendrait le verrou du volume pendant un morceau
+// écrit par le cœur 2, émulation arrêtée. Pas de CarteLire, CarteLireDans ni
+// CarteEcrire entre les deux (elles réservent elles-mêmes).
+void CarteReserver (void);
+void CarteLiberer (void);
+
 // Seul client autorisé : adresse ou nom (cyberlab.local par mDNS, sinon DNS
 // de la box), résolu à nouveau si une autre adresse se présente (bail DHCP
 // changé). pService : « TFTP », « Web »... pour le journal.

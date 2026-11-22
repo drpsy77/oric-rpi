@@ -27,9 +27,9 @@
 //
 // Comme le serveur TFTP : chaque connexion est une tâche de l'ordonnanceur
 // du cœur 0 ; les fichiers sont lus et écrits par le cœur 2 pendant que la
-// tâche rend la main (carte.cpp : l'Oric continue) ; listes, état et
-// contrôles après WaitIdle (cœur 1 entre deux trames), sans rendre la main
-// entre-temps ; seul le client de tftp= est servi ; une disquette montée
+// tâche rend la main (carte.cpp : l'Oric continue) ; listes et contrôles
+// après CarteReserver (cœur 2 libre) et WaitIdle (cœur 1 entre deux
+// trames), sans rendre la main entre-temps ; seul le client de tftp= est servi ; une disquette montée
 // peut être lue, pas remplacée ; un fichier reçu remplace l'ancien par
 // renommage (carte.cpp).
 //
@@ -393,7 +393,7 @@ static int Compare (const void *p1, const void *p2)
 
 // Entrées de pChemin (chemin de FatFs, CarteChemin), triées : dossiers puis
 // fichiers. À la racine de la carte, les clés USB présentes d'abord.
-// Touche la carte : après WaitIdle, sans rendre la main.
+// Touche la carte : après CarteReserver et WaitIdle, sans rendre la main.
 static FRESULT LireDossier (const char *pChemin, TEntree *pEntrees, unsigned *pnEntrees,
 			    bool *pbTronque)
 {
@@ -490,11 +490,14 @@ THTTPStatus COricWeb::PageDossier (const char *pDossier, CPage *pPage)
 		return HTTPInternalServerError;
 	}
 
-	// Carte : entre deux trames, sans rendre la main
+	// Carte : cœur 2 libre (fichier en cours fini), puis entre deux trames,
+	// sans rendre la main
+	CarteReserver ();
 	(*m_pHooks->WaitIdle) ();
 	unsigned nEntrees;
 	bool bTronque;
 	FRESULT Res = LireDossier (Chemin, pEntrees, &nEntrees, &bTronque);
+	CarteLiberer ();
 
 	CString Etat;
 	(*m_pHooks->Status) (&Etat);
@@ -652,10 +655,12 @@ THTTPStatus COricWeb::Liste (const char *pDossier, CPage *pPage)
 		return HTTPOK;
 	}
 
+	CarteReserver ();
 	(*m_pHooks->WaitIdle) ();
 	unsigned nEntrees;
 	bool bTronque;
 	FRESULT Res = LireDossier (Chemin, pEntrees, &nEntrees, &bTronque);
+	CarteLiberer ();
 	if (Res != FR_OK)
 	{
 		pPage->Printf ("erreur : dossier introuvable\n");
@@ -731,11 +736,14 @@ THTTPStatus COricWeb::Fichier (const char *pNom, u8 *pBuffer, unsigned *pLength,
 	CarteRelatif (Chemin, Relatif, sizeof Relatif);
 
 	// Dossier sous /f/ (racine d'un volume comprise) : sa liste
+	CarteReserver ();
 	(*m_pHooks->WaitIdle) ();
 	FILINFO Info;
 	size_t nChemin = strlen (Chemin);
-	if (   Chemin[nChemin - 1] == '/'
-	    || (f_stat (Chemin, &Info) == FR_OK && (Info.fattrib & AM_DIR)))
+	bool bDossier =    Chemin[nChemin - 1] == '/'
+			|| (f_stat (Chemin, &Info) == FR_OK && (Info.fattrib & AM_DIR));
+	CarteLiberer ();
+	if (bDossier)
 	{
 		return PageDossier (pNom, pPage);
 	}

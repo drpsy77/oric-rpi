@@ -24,6 +24,12 @@ void disquette_service(emulator_t* emu);
  * doit être arrêtée (entre deux trames). */
 void disquette_flush(emulator_t* emu);
 
+/* Même chose, seulement si des pistes attendent (écriture de l'Oric depuis
+ * la dernière réécriture, clé absente) : sinon les fichiers sont à jour, et
+ * disquette_flush chargerait chaque disquette jamais réécrite pour la
+ * comparer (~0,5 s par Mo, émulation arrêtée). */
+void disquette_flush_attente(emulator_t* emu);
+
 /* Vrai si path (relatif à la racine de la carte, « SD:/ » permis) est une
  * disquette montée, Microdisc ou LOCI. Émulation entre deux trames. */
 bool disquette_montee(emulator_t* emu, const char* path);

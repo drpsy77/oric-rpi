@@ -58,7 +58,8 @@ void oric_machine_shutdown(void);
 
 /* Serveur TFTP (émulation entre deux trames, cœur 0) : path (relatif à la
  * racine de la carte, « SD:/ » permis) est-il une disquette montée
- * (Microdisc ou LOCI) ? Réécriture immédiate des pistes modifiées. */
+ * (Microdisc ou LOCI) ? Réécriture immédiate des pistes modifiées (rien
+ * si aucune n'attend). */
 bool oric_machine_disk_mounted(const char* path);
 void oric_machine_flush_disks(void);
 
