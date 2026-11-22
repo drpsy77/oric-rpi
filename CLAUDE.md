@@ -504,3 +504,14 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    cadence à revoir) ; imprimante vers un fichier (à vérifier : le port ne
    l'écrit peut-être pas) ; instantanés par Ctrl+Alt+touche (`savestate`
    déjà lié) ; LED d'activité pendant la réécriture des disquettes.
+14. **Accès réseau à la carte par le cœur 2** (accord de Pierre,
+   22/11/2026, à faire) : TFTP et la page web arrêtent l'Oric pendant
+   chaque accès à la carte (`WaitEmulationIdle` sans rendre la main :
+   ~0,25 à 0,5 s par Mo écrit). Le cœur 2 (libre) ferait les lectures et
+   l'écriture de `x.nouveau` par morceaux de 64 Ko, sous le verrou de
+   FatFs déjà présent dans Circle (`FF_FS_REENTRANT 1`) ; le protocole
+   reste sur le cœur 0 (pile TCP/IP), la fin d'écriture (contrôles,
+   renommages) entre deux trames. Plan : `docs/plan-coeur2-carte.md`.
+   Ensuite : serveur **WebDAV** (`dav://oric.local/` dans PCManFM par
+   gvfs, `davfs2` pour un point de montage ; effacer, renommer, dossiers),
+   préféré à 9P, NFS et SMB.
