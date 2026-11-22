@@ -56,4 +56,9 @@ LDFLAGS += --wrap=loci_rom_swap_cb
 # Taille des volumes FatFs pour le menu de LOCI (cles.cpp, __wrap_statvfs)
 LDFLAGS += --wrap=statvfs
 
+# Noyau entier (BSS comprise) dans KERNEL_MAX_SIZE (Config.mk de Circle,
+# 2 Mo par défaut) : vérifié par limite.ld (la mire figée sinon)
+PORT_KERNEL_MAX_SIZE = $(or $(patsubst -DKERNEL_MAX_SIZE=%,%,$(filter -DKERNEL_MAX_SIZE=%,$(DEFINE))),0x200000)
+LDFLAGS += --defsym=PORT_KERNEL_MAX_SIZE=$(PORT_KERNEL_MAX_SIZE) limite.ld
+
 -include $(DEPS)

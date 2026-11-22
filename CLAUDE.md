@@ -73,7 +73,7 @@ cd /home/pi/Projets/circle-stdlib/libs/circle/addon/wlan
 EXTRAINCLUDE="-isystem /home/pi/Projets/circle-stdlib/install/arm-none-circle/include" ./makeall --nosample
 ```
 
-puis `rm -f kernel8-32.elf && make` ici (le Makefile ne voit pas le
+puis `rm -f kernel8-32.img && make` ici (le Makefile ne voit pas le
 changement de bibliothèque).
 
 Changer une option de `./configure` : `make mrproper` d'abord (sinon newlib
@@ -331,6 +331,13 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   `IsSet ()` d'abord. Rencontré dans `tftp.cpp` (client pas encore résolu).
 - Mise à jour du noyau par TFTP : un noyau qui plante au premier transfert
   ne peut pas être remplacé ainsi ; carte dans le lecteur de la RPI 400.
+- Mire figée après l'ajout d'un tableau statique de 64 Ko (22/11/2026) :
+  `_end` (fin de la BSS) dépassait `MEM_KERNEL_END` (0x8000 +
+  `KERNEL_MAX_SIZE`, 4 Mo dans le `Config.mk` de Circle) ; la BSS
+  recouvrait la pile du cœur 0. Circle ne le vérifie pas : `limite.ld`
+  (Makefile) refuse maintenant l'édition de liens. Marge restante ~39 Ko :
+  gros tampons par `malloc`, pas en statique (`arm-none-eabi-nm
+  kernel8-32.elf | grep " _end$"`).
 
 ## État (16/11/2026)
 

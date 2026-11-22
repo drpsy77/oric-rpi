@@ -163,7 +163,8 @@ void CarteRelatif (const char *pChemin, char *pRelatif, unsigned nTaille)
 // tas.
 //
 // Tampon de l'appelant non aligné sur 4 octets (fichier d'un envoi de la
-// page web, au milieu de la requête) : copié par morceaux dans s_Morceau.
+// page web, au milieu de la requête) : copié par morceaux dans s_pMorceau
+// (sans lui, refusé).
 // Sinon disk_read et disk_write (diskio.cpp de Circle) passeraient par leur
 // propre tampon, statique, commun à tous les volumes et sans verrou, que le
 // cœur 1 peut utiliser au même moment sur un autre volume. Les tampons de
@@ -209,11 +210,14 @@ struct TTravail
 static TTravail s_Travail;
 static bool s_bOccupee;				// case prise par une tâche du cœur 0
 static void (*s_pAttenteTrame) (void);
-static u8 s_Morceau[CARTE_MORCEAU] __attribute__ ((aligned (64)));
+// Réservé au démarrage, pas en mémoire statique : le noyau (code, données
+// et BSS) doit tenir dans KERNEL_MAX_SIZE (Makefile, limite.ld)
+static u8 *s_pMorceau;
 
 void CarteInitialiser (void (*pAttenteTrame) (void))
 {
 	s_pAttenteTrame = pAttenteTrame;
+	s_pMorceau = (u8 *) malloc (CARTE_MORCEAU);	// aligné (tas de Circle)
 }
 
 static bool Aligne (const void *p)
@@ -240,6 +244,10 @@ static void Lire (TTravail *t)
 	{
 		t->Resultat = ResultatTropGros;
 	}
+	else if (!Aligne (t->pTampon) && s_pMorceau == 0)
+	{
+		t->Resultat = ResultatIllisible;
+	}
 	else
 	{
 		t->Resultat = ResultatOK;
@@ -251,7 +259,7 @@ static void Lire (TTravail *t)
 			{
 				n = CARTE_MORCEAU;
 			}
-			u8 *p = bAligne ? t->pTampon + nPos : s_Morceau;
+			u8 *p = bAligne ? t->pTampon + nPos : s_pMorceau;
 			UINT nLu = 0;
 			if (f_read (&File, p, n, &nLu) != FR_OK || nLu != n)
 			{
@@ -260,7 +268,7 @@ static void Lire (TTravail *t)
 			}
 			if (!bAligne)
 			{
-				memcpy (t->pTampon + nPos, s_Morceau, n);
+				memcpy (t->pTampon + nPos, s_pMorceau, n);
 			}
 			nPos += n;
 		}
@@ -270,6 +278,11 @@ static void Lire (TTravail *t)
 
 static void Ecrire (TTravail *t)
 {
+	if (!Aligne (t->pTampon) && s_pMorceau == 0)
+	{
+		t->Resultat = ResultatEcriture;
+		return;
+	}
 	FIL File;
 	if (f_open (&File, t->pChemin, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
 	{
@@ -288,8 +301,8 @@ static void Ecrire (TTravail *t)
 		const u8 *p = t->pTampon + nPos;
 		if (!bAligne)
 		{
-			memcpy (s_Morceau, p, n);
-			p = s_Morceau;
+			memcpy (s_pMorceau, p, n);
+			p = s_pMorceau;
 		}
 		UINT nEcrit = 0;
 		if (f_write (&File, p, n, &nEcrit) != FR_OK || nEcrit != n)
