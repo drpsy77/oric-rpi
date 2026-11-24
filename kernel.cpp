@@ -209,6 +209,10 @@ CKernel::CKernel (void)
 	m_nLateCount (0), m_nLateCountLast (0),
 	m_nLateLogged (0), m_nRecal (0),
 	m_nCore0WindowStart (0), m_nCore0Windows (0),
+	m_nHourNext (3600),
+	m_nHourLate5 (0), m_nHourLate10 (0), m_nHourLateMax (0), m_nHourLateAt (0),
+	m_nHourRecal (0), m_nHourUnlogged (0), m_nHourEmuMax (0), m_nHourSkipped (0),
+	m_nHourWindowsSeen (0),
 	m_nLastEmu (0), m_nLastAudio (0), m_nLastBlit (0),
 	m_nKeyReports (0), m_nKeyReportsLogged (0), m_nKeyReportsTicks (0)
 {
@@ -217,6 +221,7 @@ CKernel::CKernel (void)
 	memset (m_nAct0Last, 0, sizeof m_nAct0Last);
 	memset (m_nAct0Worst, 0, sizeof m_nAct0Worst);
 	memset (m_nAct0Request, 0, sizeof m_nAct0Request);
+	memset (m_nAct0Hour, 0, sizeof m_nAct0Hour);
 	mActLED.Blink (5);	// show we are alive
 }
 
@@ -1389,9 +1394,26 @@ unsigned CKernel::Core0Time (unsigned nActivity, unsigned nStart)
 	return nNow;
 }
 
+// Fréquence, température et état du firmware (bit 0 sous-tension, 1
+// fréquence plafonnée, 2 ralenti, 3 limite de température douce ; bits
+// 16-19 : déjà arrivé depuis le démarrage) : appels au firmware
+void CKernel::FirmwareState (unsigned *pMHz, unsigned *pTemp, unsigned *pThrottled)
+{
+	*pMHz = CMachineInfo::Get ()->GetClockRate (CLOCK_ID_ARM) / 1000000;
+	*pTemp = s_pThis->m_CPUThrottle.GetTemperature ();
+	CBcmPropertyTags Tags;
+	TPropertyTagSimple TagThrottled;
+	TagThrottled.nValue = 0;
+	*pThrottled = Tags.GetTag (PROPTAG_GET_THROTTLED, &TagThrottled, sizeof TagThrottled, 4)
+		      ? TagThrottled.nValue : 0xFFFFFFFF;
+}
+
+#define LATE_LINES_MAX	1000		// lignes détaillées des retards
+
 // Cœur 0 : une trame demandée nLate µs après son échéance. Au-delà de 10 ms,
 // une ligne dans le journal avec l'activité la plus longue depuis la demande
-// précédente (au plus 1000 lignes, le journal écrit lui-même sur la carte)
+// précédente (au plus LATE_LINES_MAX lignes, le journal écrit lui-même sur
+// la carte ; ensuite, seulement le résumé de chaque heure)
 void CKernel::Core0Late (unsigned nLate)
 {
 	if (nLate > m_nLateMax)
@@ -1401,8 +1423,22 @@ void CKernel::Core0Late (unsigned nLate)
 	if (nLate > 5000)
 	{
 		m_nLateCount++;
+		m_nHourLate5++;
 	}
-	if (nLate > 10000 && m_nLateLogged < 1000)
+	if (nLate > 10000)
+	{
+		m_nHourLate10++;
+		if (nLate > m_nHourLateMax)
+		{
+			m_nHourLateMax = nLate;
+			m_nHourLateAt = CTimer::Get ()->GetUptime ();
+		}
+		if (m_nLateLogged >= LATE_LINES_MAX)
+		{
+			m_nHourUnlogged++;
+		}
+	}
+	if (nLate > 10000 && m_nLateLogged < LATE_LINES_MAX)
 	{
 		static const char *Names[Act0Nb] =
 			{ "taches", "relais", "divers", "USB", "son", "journal" };
@@ -1423,17 +1459,7 @@ void CKernel::Core0Late (unsigned nLate)
 		if (nUptime != s_nLastSecond)
 		{
 			s_nLastSecond = nUptime;
-			s_nMHz = CMachineInfo::Get ()->GetClockRate (CLOCK_ID_ARM) / 1000000;
-			s_nTemp = m_CPUThrottle.GetTemperature ();
-			// État du firmware : bit 0 sous-tension, 1 fréquence plafonnée,
-			// 2 ralenti, 3 limite de température douce (bits 16-19 : déjà
-			// arrivé depuis le démarrage)
-			CBcmPropertyTags Tags;
-			TPropertyTagSimple TagThrottled;
-			TagThrottled.nValue = 0;
-			s_nThrottled = Tags.GetTag (PROPTAG_GET_THROTTLED, &TagThrottled,
-						    sizeof TagThrottled, 4)
-				       ? TagThrottled.nValue : 0xFFFFFFFF;
+			FirmwareState (&s_nMHz, &s_nTemp, &s_nThrottled);
 		}
 		unsigned nNow = CTimer::GetClockTicks ();
 		unsigned nReports = m_nKeyReports;
@@ -1451,6 +1477,11 @@ void CKernel::Core0Late (unsigned nLate)
 			       m_nLastAudio / 1000, m_nLastBlit / 1000,
 			       s_nMHz, s_nTemp, s_nThrottled, nPerSecond);
 		m_nLateLogged++;
+		if (m_nLateLogged == LATE_LINES_MAX)
+		{
+			JournalPrintf ("Coeur 0 : %u lignes de retard notees, la suite dans le"
+				       " resume de chaque heure\n", LATE_LINES_MAX);
+		}
 	}
 	memset (m_nAct0Request, 0, sizeof m_nAct0Request);
 }
@@ -1458,6 +1489,20 @@ void CKernel::Core0Late (unsigned nLate)
 // Cœur 0 : fenêtres de 10 s, comme les mesures du cœur 1
 void CKernel::Core0Window (unsigned nNow)
 {
+	// Fenêtre de 10 s du cœur 1 terminée : relevée pour le résumé de l'heure
+	// (à chaque tour : les deux fenêtres ne sont pas en phase)
+	unsigned nWindows = m_nWindows;
+	if (nWindows != m_nHourWindowsSeen)
+	{
+		DataMemBarrier ();
+		m_nHourWindowsSeen = nWindows;
+		if (m_nLastMax > m_nHourEmuMax)
+		{
+			m_nHourEmuMax = m_nLastMax;
+		}
+		m_nHourSkipped += m_nLastSkipped;
+	}
+
 	if (nNow - m_nCore0WindowStart < STATS_FRAMES * FRAME_US)
 	{
 		return;
@@ -1471,7 +1516,15 @@ void CKernel::Core0Window (unsigned nNow)
 		{
 			m_nAct0Worst[i] = m_nAct0Max[i];
 		}
+		if (m_nAct0Max[i] > m_nAct0Hour[i])
+		{
+			m_nAct0Hour[i] = m_nAct0Max[i];
+		}
 		m_nAct0Max[i] = 0;
+	}
+	if (CTimer::Get ()->GetUptime () >= m_nHourNext)
+	{
+		HourSummary ();
 	}
 	m_nLateLast = m_nLateMax;
 	if (m_nLateMax > m_nLateWorst)
@@ -1481,6 +1534,68 @@ void CKernel::Core0Window (unsigned nNow)
 	m_nLateMax = 0;
 	m_nLateCountLast = m_nLateCount;
 	m_nLateCount = 0;
+}
+
+// Cœur 0, chaque heure de marche : une ligne dans le journal, même sans
+// retard (la Pi tourne encore, fréquence, température)
+void CKernel::HourSummary (void)
+{
+	unsigned nHour = m_nHourNext / 3600;
+
+	char Fin[40] = "heure inconnue";
+	if (m_bClockSet)
+	{
+		time_t nUTC = CTimer::Get ()->GetUniversalTime ();
+		struct tm Local;
+		if (localtime_r (&nUTC, &Local) != 0)
+		{
+			snprintf (Fin, sizeof Fin, "%02d/%02d/%04d %02d:%02d",
+				  Local.tm_mday, Local.tm_mon + 1, Local.tm_year + 1900,
+				  Local.tm_hour, Local.tm_min);
+		}
+	}
+
+	static const char *Names[Act0Nb] =
+		{ "taches", "relais", "divers", "USB", "son", "journal" };
+	unsigned nMax = 0;
+	for (unsigned i = 1; i < Act0Nb; i++)
+	{
+		if (m_nAct0Hour[i] > m_nAct0Hour[nMax])
+		{
+			nMax = i;
+		}
+	}
+
+	unsigned nMHz, nTemp, nThrottled;
+	FirmwareState (&nMHz, &nTemp, &nThrottled);
+
+	CString Pire;
+	if (m_nHourLate10 > 0)
+	{
+		Pire.Format (", pire %u ms a %u:%02u:%02u", m_nHourLateMax / 1000,
+			     m_nHourLateAt / 3600, m_nHourLateAt / 60 % 60, m_nHourLateAt % 60);
+	}
+	CString NonNotes;
+	if (m_nHourUnlogged > 0)
+	{
+		NonNotes.Format (" (%u sans ligne detaillee)", m_nHourUnlogged);
+	}
+	JournalPrintf ("Heure %u de marche (fin le %s) : coeur 0 : %u trame(s) en retard"
+		       " de plus de 10 ms%s%s, %u de plus de 5 ms, %u recalage(s) ;"
+		       " coeur 1 : pire trame %u ms, %u image(s) sautee(s) ;"
+		       " plus long au coeur 0 : %s %u ms ; %u MHz %u C etat %X\n",
+		       nHour, Fin, m_nHourLate10, (const char *) Pire, (const char *) NonNotes,
+		       m_nHourLate5, m_nRecal - m_nHourRecal,
+		       m_nHourEmuMax / 1000, m_nHourSkipped,
+		       Names[nMax], m_nAct0Hour[nMax] / 1000,
+		       nMHz, nTemp, nThrottled);
+
+	m_nHourNext += 3600;
+	m_nHourLate5 = m_nHourLate10 = m_nHourLateMax = m_nHourLateAt = 0;
+	m_nHourRecal = m_nRecal;
+	m_nHourUnlogged = 0;
+	m_nHourEmuMax = m_nHourSkipped = 0;
+	memset (m_nAct0Hour, 0, sizeof m_nAct0Hour);
 }
 
 void CKernel::WritePerf (void)

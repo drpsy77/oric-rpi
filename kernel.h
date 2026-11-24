@@ -69,6 +69,8 @@ private:
 	unsigned Core0Time (unsigned nActivity, unsigned nStart);
 	void Core0Late (unsigned nLate);
 	void Core0Window (unsigned nNow);
+	void HourSummary (void);
+	static void FirmwareState (unsigned *pMHz, unsigned *pTemp, unsigned *pThrottled);
 	void LogToJournal (void);
 	void ShowHalted (void);
 	void SetupKeyMap (void);
@@ -185,6 +187,16 @@ private:
 	unsigned m_nLateLogged;				// lignes du journal (> 10 ms)
 	unsigned m_nRecal;				// recalages (> 5 trames)
 	unsigned m_nCore0WindowStart, m_nCore0Windows;
+	// Résumé de chaque heure de marche dans le journal (HourSummary) : les
+	// lignes détaillées des retards s'arrêtent à LATE_LINES_MAX
+	unsigned m_nHourNext;				// GetUptime () du prochain résumé
+	unsigned m_nHourLate5, m_nHourLate10;		// trames en retard de > 5, > 10 ms
+	unsigned m_nHourLateMax, m_nHourLateAt;		// pire retard (µs), son GetUptime ()
+	unsigned m_nHourRecal;				// m_nRecal au début de l'heure
+	unsigned m_nHourUnlogged;			// retards > 10 ms sans ligne détaillée
+	unsigned m_nHourEmuMax, m_nHourSkipped;		// cœur 1 : fenêtres de 10 s relevées
+	unsigned m_nHourWindowsSeen;			// m_nWindows à la dernière relève
+	unsigned m_nAct0Hour[Act0Nb];			// plus longues activités du cœur 0
 	volatile unsigned m_nLastEmu;			// cœur 1 : durée de la dernière trame
 	volatile unsigned m_nLastAudio;			// ... dont le son (ay_generate)
 	volatile unsigned m_nLastBlit;			// cœur 1 : copie de l'image

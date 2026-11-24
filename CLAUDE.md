@@ -206,7 +206,10 @@ session précédente dans `journal-precedent.txt`), `oric/perf.txt` (F12, une
 mesure ajoutée par appui ; cœur 1 : durée des trames ; cœur 0 : retard
 des demandes de trame sur l'échéance de 20 ms et plus longue durée de
 chaque activité ; en plus, « Coeur 0 : trame en retard de N ms » dans le
-journal au-delà de 10 ms, avec l'activité la plus longue),
+journal au-delà de 10 ms, avec l'activité la plus longue, 1000 lignes au
+plus ; chaque heure de marche, « Heure N de marche » : retards de plus de
+5 et 10 ms et le pire, recalages, pire trame du cœur 1 et images sautées,
+activité la plus longue du cœur 0, MHz, °C, état du firmware),
 `oric/loci/picowifi.cfg` (AT&W du modem).
 
 ## Fichiers du port
@@ -594,5 +597,5 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    « track(s) written back » ; Ctrl+Alt+Suppr juste après une
    écriture sous CP/A (rien de perdu) ; clé retirée puis remise avec une
    disquette montée ; lecture d'une disquette montée par `carte.sh lire`.
-   Le journal ne note que les 1000 premiers retards
-   (`m_nLateLogged`, `kernel.cpp`) : 13 h de vitrine le 22/11.
+   Le journal ne notait que les 1000 premiers retards (13 h de vitrine le
+   22/11) : résumé de chaque heure ajouté (`HourSummary`, 24/11/2026).
