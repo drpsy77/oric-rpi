@@ -215,7 +215,7 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
 |---|---|
 | `kernel.cpp/.h` | cœur 0 : clavier et souris USB, son HDMI, réseau (Wi-Fi ou Ethernet), température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) ; cœur 2 : `CarteCoeur2` |
 | `oric_machine.c/.h` | colle extraite de `main.c` de Phosphoric, API C opaque |
-| `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture), cœur 1 entre deux trames |
+| `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture) : relevé par le cœur 1 entre deux trames, lecture et écriture du fichier par le cœur 2 |
 | `locidisk.c/.h` | `locidisk=0:/x.dsk` : A: de LOCI monté, XRAM du menu, démarrage direct (comme le menu puis Échap) |
 | `journal.cpp/.h` | journal en mémoire (verrou entre cœurs), écrit par le cœur 0 |
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
@@ -295,6 +295,20 @@ journal au-delà de 10 ms, avec l'activité la plus longue),
   effacé par le cœur 2. Branchements USB reportés pendant un travail sur
   une clé (`CarteCoeur2SurCle`) ; arrêt et redémarrage attendent la fin du
   travail (`CarteCoeur2Attendre`).
+- **Disquettes par le cœur 2** (`disquette.c`, 24/11/2026) : le cœur 1
+  compare l'image au contenu du fichier et recopie les pistes changées
+  (court), le cœur 2 les écrit (`f_lseek`/`f_write`) et lit le fichier
+  la première fois (`decoder`, d'après `sedoric_load`) ; case à part de
+  celle de `carte.cpp`, passée en premier, résultat et journal relevés par
+  le cœur 1 à une trame suivante. Avant, sur le cœur 1 : trames de 40 à
+  75 ms à chaque réécriture (journal du 22/11, 193 trames longues sur
+  245). Pendant le travail, le cœur 1 ne touche à aucune copie.
+  `disquette_flush` (arrêt, lecture par le réseau) attend sa fin puis
+  travaille sur place. Sections entre deux trames de `carte.cpp`
+  (`AttenteTrame`) : sans réécriture en cours (fichier lu, effacé,
+  renommé). Banc natif (fil pour le cœur 2, FatFs sur POSIX) : MFM et
+  brut, LOCI et Microdisc, écriture de l'Oric pendant le travail,
+  `disquette_flush` : fichier identique à `sedoric_save`.
 - **Ordonnanceur** : `CStdlibAppNetwork` crée un `CScheduler`, cœur 0
   seulement. circle-newlib y rend la main dans les sockets **et dans
   `_close`** : d'où `netrelay.cpp`, qui exécute ces appels du cœur 1 sur le
@@ -573,3 +587,12 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    (`banc-dav/` : gio, curl), à essayer sur la 3B+** : `dav=81` (voir
    Carte SD) ; décisions de Pierre et essais restants :
    `docs/plan-webdav.md`. Étape 0 faite : `s_emu` par `calloc`.
+15. **Réécriture des disquettes par le cœur 2** (accord de Pierre,
+   24/11/2026) : la vitrine arrêtait l'Oric 40 à 75 ms à chaque
+   réécriture de `cpa-en.dsk`. **Fait (24/11/2026), banc natif**, à
+   essayer sur la 3B+ : journal sans « trame en retard » près des
+   « track(s) written back » ; Ctrl+Alt+Suppr juste après une
+   écriture sous CP/A (rien de perdu) ; clé retirée puis remise avec une
+   disquette montée ; lecture d'une disquette montée par `carte.sh lire`.
+   Le journal ne note que les 1000 premiers retards
+   (`m_nLateLogged`, `kernel.cpp`) : 13 h de vitrine le 22/11.

@@ -226,6 +226,9 @@ extern "C" bool oric_machine_disk_mounted_under (const char *dir)
 
 extern "C" void oric_machine_flush_disks (void)		{}
 extern "C" unsigned oric_machine_disk_writes (void)	{ return 0; }
+extern "C" bool oric_machine_disk_job_pending (void)	{ return false; }
+extern "C" void oric_machine_disk_job_run (void)	{ }
+extern "C" bool oric_machine_disk_job_on_key (void)	{ return false; }
 
 // ── FatFs sur des fichiers POSIX ──
 static void Hote (const char *p, char *pHote, unsigned n)

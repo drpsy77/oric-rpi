@@ -28,14 +28,16 @@
  * remise : le fichier est relu avant la comparaison (il a pu changer
  * ailleurs ; l'image de l'Oric l'emporte sur les pistes qui diffèrent).
  *
- * Appelé sur le cœur 1 entre deux trames, comme les accès de LOCI à la carte.
+ * Comparaison sur le cœur 1 entre deux trames ; lecture et écriture du
+ * fichier par le cœur 2 pendant que l'Oric continue (voir « Travail du
+ * cœur 2 » plus bas).
  */
 #include "disquette.h"
 #include "cles.h"
 #include "storage/sedoric.h"
 #include "utils/logging.h"
 
-#include <stdio.h>
+#include <fatfs/ff.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -62,9 +64,10 @@ static copie_t s_loci[NB_LECTEURS], s_microdisc[NB_LECTEURS];
 static const char* s_microdisc_path[NB_LECTEURS];
 static int s_calme = -1;        /* trames depuis la dernière écriture ; -1 : rien */
 static int s_attente;           /* trames depuis le dernier essai (clé absente) */
-/* Réécritures sur la carte : +1 avant, +1 après (impair : en cours). Lu par
- * le cœur 0 (carte.cpp) autour d'une lecture du cœur 2 : une disquette
- * montée réécrite pendant qu'il la lit est relue. */
+/* Réécritures sur la carte : +1 quand le cœur 1 les demande, +1 quand il en
+ * relève la fin (impair : en cours). Lu par le cœur 0 (carte.cpp) autour
+ * d'une lecture du cœur 2 : une disquette montée réécrite entre-temps est
+ * relue. */
 static volatile unsigned s_reecritures;
 
 void disquette_set_microdisc_path(int drive, const char* path) {
@@ -176,74 +179,298 @@ static bool cle_prete(copie_t* c) {
     return true;
 }
 
-/* Réécrit dans le fichier les pistes où l'image diffère de son contenu. */
-static void sauver(copie_t* c, const uint8_t* image, uint32_t size, const char* path) {
+/* ── Travail du cœur 2 ─────────────────────────────────────────────────
+ *
+ * Une réécriture se fait en deux temps. Le cœur 1, entre deux trames,
+ * compare l'image de Phosphoric au contenu du fichier (copie_t.fichier),
+ * recopie les pistes changées dans ce contenu (pistes MFM réencodées) et
+ * note leur place : c'est court (memcmp d'un Mo). Le cœur 2 (CarteCoeur2,
+ * carte.cpp) les écrit ensuite dans le fichier, pendant que l'Oric
+ * continue : sur le cœur 1, chaque réécriture arrêtait l'émulation de 20 à
+ * 60 ms (latence de la carte), et la première lecture du fichier bien plus.
+ * Contenu du fichier absent (première réécriture, clé remise) : le cœur 2 le
+ * lit, la comparaison se fait à la trame suivante.
+ *
+ * Une case (s_travail), comme celle de carte.cpp : LIBRE → DEMANDE par le
+ * cœur 1, DEMANDE → FINI par le cœur 2, FINI → LIBRE par le cœur 1 au début
+ * de disquette_service (journal). Tant qu'elle n'est pas libre, le cœur 1
+ * ne touche à aucun copie_t (le cœur 2 lit leurs fichiers) : il ne fait que
+ * noter les écritures de l'Oric.
+ *
+ * Le cœur 2 n'utilise que FatFs (f_*, lectures par morceaux de
+ * DISQUETTE_MORCEAU : le verrou du volume est rendu entre deux, LOCI sur
+ * le cœur 1 n'attend qu'un morceau), malloc et sedoric_mfm_extract_track
+ * (calcul seul) : ni stdio ni journal (voir carte.cpp). Tampons de malloc,
+ * alignés : sinon diskio.cpp de Circle copie dans son tampon statique,
+ * commun à tous les volumes et sans verrou.
+ */
+#define DISQUETTE_MORCEAU   (64u << 10)
+
+enum { TRAVAIL_LIBRE, TRAVAIL_DEMANDE, TRAVAIL_FINI };
+
+typedef struct {
+    copie_t*        c;
+    bool            charger;    /* lire le fichier (c->fichier absent) */
+    uint32_t        taille;     /* charger : taille de l'image de Phosphoric */
+    sedoric_disk_t* lu;         /* charger : contenu lu (NULL : illisible) */
+    const uint8_t*  base;       /* écrire : piste i à base + pos[i] ... */
+    uint32_t        longueur;   /* ... de cette longueur */
+    uint32_t*       pos;        /* ... places dans le fichier (malloc) */
+    int             n;
+    bool            echec;
+} element_t;
+
+typedef struct {
+    volatile unsigned etat;
+    int             nb;
+    bool            ecrit;      /* des pistes à écrire (compteur s_reecritures) */
+    bool            sur_cle;    /* un fichier sur une clé USB */
+    element_t       el[2 * NB_LECTEURS];
+} travail_t;
+
+static travail_t s_travail;
+
+/* Contenu d'un fichier lu en mémoire, rangé comme par sedoric_load (même
+ * décodage, écrit d'après lui : sedoric_load lit par stdio). raw est gardé
+ * (conteneur MFM) ou libéré. */
+static sedoric_disk_t* decoder(uint8_t* raw, uint32_t fsize) {
+    sedoric_disk_t* disk = (sedoric_disk_t*)calloc(1, sizeof(sedoric_disk_t));
+    if (!disk) { free(raw); return NULL; }
+
+    if (fsize > MFM_DISK_HEADER_SIZE && memcmp(raw, "MFM_DISK", 8) == 0) {
+        uint32_t sides  = raw[8]  | ((uint32_t)raw[9]  << 8) | ((uint32_t)raw[10] << 16) | ((uint32_t)raw[11] << 24);
+        uint32_t tracks = raw[12] | ((uint32_t)raw[13] << 8) | ((uint32_t)raw[14] << 16) | ((uint32_t)raw[15] << 24);
+        if (sides > MFM_MAX_SIDES) sides = MFM_MAX_SIDES;
+        if (tracks > MFM_MAX_TRACKS) tracks = MFM_MAX_TRACKS;
+        uint8_t spt = MFM_MAX_SECTORS;
+        uint32_t flat_size = sides * tracks * spt * SEDORIC_SECTOR_SIZE;
+        disk->data = (uint8_t*)calloc(1, flat_size ? flat_size : 1);
+        if (!disk->data) { free(disk); free(raw); return NULL; }
+        for (uint32_t s = 0; s < sides; s++) {
+            for (uint32_t t = 0; t < tracks; t++) {
+                uint32_t raw_offset = MFM_DISK_HEADER_SIZE + (s * tracks + t) * MFM_TRACK_SIZE;
+                if (raw_offset + MFM_TRACK_SIZE > fsize) break;
+                sedoric_mfm_extract_track(&raw[raw_offset], disk->data, flat_size,
+                                          spt, (uint8_t)tracks);
+            }
+        }
+        disk->size = flat_size;
+        disk->tracks = (uint8_t)tracks;
+        disk->sectors = spt;
+        disk->sides = (uint8_t)sides;
+        disk->is_mfm = true;
+        disk->mfm_raw = raw;
+        disk->mfm_raw_size = fsize;
+        return disk;
+    }
+
+    /* Secteurs à plat : seuls size et sectors servent ici */
+    disk->data = raw;
+    disk->size = fsize;
+    disk->sectors = SEDORIC_SECTORS;
+    return disk;
+}
+
+/* Cœur 2 : lecture d'un fichier (NULL : absent, vide ou illisible) */
+static sedoric_disk_t* charger(const char* path) {
+    FIL f;
+    if (f_open(&f, path, FA_READ | FA_OPEN_EXISTING) != FR_OK) return NULL;
+    FSIZE_t fsize = f_size(&f);
+    uint8_t* raw = (fsize > 0 && fsize < 0x10000000) ? (uint8_t*)malloc((size_t)fsize) : NULL;
+    bool ok = raw != NULL;
+    for (uint32_t p = 0; ok && p < fsize; ) {
+        UINT n = (fsize - p > DISQUETTE_MORCEAU) ? DISQUETTE_MORCEAU : (UINT)(fsize - p);
+        UINT lu = 0;
+        ok = f_read(&f, raw + p, n, &lu) == FR_OK && lu == n;
+        p += n;
+    }
+    f_close(&f);
+    if (!ok) { free(raw); return NULL; }
+    return decoder(raw, (uint32_t)fsize);
+}
+
+/* Cœur 2 : pistes écrites sur place (fopen "r+b" avant) */
+static bool ecrire(const char* path, const element_t* e) {
+    FIL f;
+    if (f_open(&f, path, FA_WRITE | FA_OPEN_EXISTING) != FR_OK) return false;
+    bool ok = true;
+    for (int i = 0; ok && i < e->n; i++) {
+        UINT ecrit = 0;
+        ok = f_lseek(&f, e->pos[i]) == FR_OK
+          && f_write(&f, e->base + e->pos[i], e->longueur, &ecrit) == FR_OK
+          && ecrit == e->longueur;
+    }
+    if (f_close(&f) != FR_OK) ok = false;
+    return ok;
+}
+
+/* Cœur 2, ou sur place (disquette_flush) */
+static void executer(travail_t* t) {
+    for (int i = 0; i < t->nb; i++) {
+        element_t* e = &t->el[i];
+        if (e->charger) e->lu = charger(e->c->path);
+        else e->echec = !ecrire(e->c->path, e);
+    }
+}
+
+/* Cœur 1 : pistes où l'image diffère du fichier, recopiées dans son contenu
+ * et notées dans la case ; contenu absent : lecture demandée. */
+static void preparer(travail_t* t, copie_t* c, const uint8_t* image, uint32_t size,
+                     const char* path) {
     associer(c, image, path);
     if (c->refus) return;
     if (c->cle && !cle_prete(c)) return;
 
+    element_t* e = &t->el[t->nb];
+    memset(e, 0, sizeof(*e));
+    e->c = c;
     if (!c->fichier) {
-        c->fichier = sedoric_load(path);
-        if (!c->fichier || c->fichier->size != size || c->fichier->sectors == 0) {
-            log_warning("[port] %s: geometry differs from the mounted image, not written back", path);
-            sedoric_destroy(c->fichier);
-            c->fichier = NULL;
-            c->refus = true;
-            return;
-        }
+        e->charger = true;
+        e->taille = size;
+        t->nb++;
+        if (c->cle) t->sur_cle = true;
+        return;
     }
 
     sedoric_disk_t* f = c->fichier;
     uint32_t piste = (uint32_t)f->sectors * SEDORIC_SECTOR_SIZE;
-    FILE* fp = NULL;
-    int n = 0;
-    bool echec = false;
-    bool compte = false;        /* s_reecritures déjà augmenté */
-    for (uint32_t k = 0; k < size / piste; k++) {
+    uint32_t nb_pistes = size / piste;
+    for (uint32_t k = 0; k < nb_pistes; k++) {
         uint32_t off = k * piste;
         if (memcmp(image + off, f->data + off, piste) == 0) continue;
+        if (!e->pos && !(e->pos = (uint32_t*)malloc(nb_pistes * sizeof(uint32_t)))) return;
         memcpy(f->data + off, image + off, piste);
 
         /* Piste k du fichier : face 0 puis face 1, comme sedoric_load */
-        const uint8_t* bloc = f->data + off;
-        long pos = (long)off;
-        size_t len = piste;
+        uint32_t pos = off;
         if (f->is_mfm) {
-            pos = MFM_DISK_HEADER_SIZE + (long)k * MFM_TRACK_SIZE;
-            if (pos + MFM_TRACK_SIZE > (long)f->mfm_raw_size) continue;
+            pos = MFM_DISK_HEADER_SIZE + k * MFM_TRACK_SIZE;
+            if (pos + MFM_TRACK_SIZE > f->mfm_raw_size) continue;
             mfm_inject_track(&f->mfm_raw[pos], f->data, f->size, f->sectors, f->tracks);
-            bloc = &f->mfm_raw[pos];
-            len = MFM_TRACK_SIZE;
         }
-
-        if (!compte) {
-            compte = true;
-            s_reecritures++;
-            __sync_synchronize();
-        }
-        if (!fp && !(fp = fopen(path, "r+b"))) { echec = true; break; }
-        if (fseek(fp, pos, SEEK_SET) != 0 || fwrite(bloc, 1, len, fp) != len) { echec = true; break; }
-        n++;
+        e->pos[e->n++] = pos;
     }
-    if (fp && fclose(fp) != 0) echec = true;
-    if (compte) {
+    if (e->n == 0) {
+        free(e->pos);
+        return;
+    }
+    e->base = f->is_mfm ? f->mfm_raw : f->data;
+    e->longueur = f->is_mfm ? MFM_TRACK_SIZE : piste;
+    t->nb++;
+    t->ecrit = true;
+    if (c->cle) t->sur_cle = true;
+}
+
+/* Cœur 1, entre deux trames : remplit la case pour toutes les disquettes
+ * montées ; vrai s'il y a quelque chose à faire. */
+static bool preparer_tout(emulator_t* emu) {
+    travail_t* t = &s_travail;
+    s_calme = -1;
+    t->nb = 0;
+    t->ecrit = false;
+    t->sur_cle = false;
+
+    /* Disquettes de LOCI (dsk_image : secteurs à plat, comme sedoric_load) */
+    for (int d = 0; d < NB_LECTEURS; d++) {
+        const loci_t* l = &emu->loci;
+        if (emu->card_on[CARD_IDX_loci] && l->dsk_image[d] && !l->dsk_web[d] && l->dsk_host_path[d][0])
+            preparer(t, &s_loci[d], l->dsk_image[d], l->dsk_image_size[d], l->dsk_host_path[d]);
+        else
+            oublier(&s_loci[d]);
+    }
+    /* Disquettes du Microdisc (disk=) */
+    for (int d = 0; d < NB_LECTEURS; d++) {
+        const sedoric_disk_t* disk = emu->disks[d];
+        if (emu->card_on[CARD_IDX_microdisc] && disk && disk->data && s_microdisc_path[d])
+            preparer(t, &s_microdisc[d], disk->data, disk->size, s_microdisc_path[d]);
+        else
+            oublier(&s_microdisc[d]);
+    }
+    if (t->ecrit) {
+        s_reecritures++;        /* impair : réécriture en cours */
+        __sync_synchronize();
+    }
+    return t->nb > 0;
+}
+
+/* Cœur 1 (ou celui de disquette_flush) : résultats de la case, journal */
+static void recueillir(travail_t* t) {
+    __sync_synchronize();
+    bool lu = false;
+    for (int i = 0; i < t->nb; i++) {
+        element_t* e = &t->el[i];
+        copie_t* c = e->c;
+        if (e->charger) {
+            unsigned serie, branchement;
+            if (e->lu && e->lu->size == e->taille && e->lu->sectors != 0) {
+                c->fichier = e->lu;
+                lu = true;
+            } else if (!e->lu && c->cle && cles_usb_etat(c->path, &serie, &branchement) == 0) {
+                /* clé retirée avant la lecture : nouvel essai à son retour */
+                if (!c->attente) log_warning("[port] %s: USB key removed, write-back postponed", c->path);
+                c->attente = true;
+            } else {
+                log_warning("[port] %s: geometry differs from the mounted image, not written back", c->path);
+                sedoric_destroy(e->lu);
+                c->refus = true;
+            }
+        } else {
+            if (e->echec) {
+                /* fichier dans un état inconnu : relu à la prochaine
+                 * réécriture ; clé retirée pendant l'écriture : nouvel
+                 * essai à son retour */
+                log_error("[port] %s: write-back failed", c->path);
+                sedoric_destroy(c->fichier);
+                c->fichier = NULL;
+                if (c->cle) c->attente = true;
+            } else {
+                log_info("[port] %s: %d track(s) written back", c->path, e->n);
+            }
+            free(e->pos);
+        }
+    }
+    if (t->ecrit) {
         __sync_synchronize();
         s_reecritures++;
     }
+    t->nb = 0;
+    t->ecrit = false;
+    t->sur_cle = false;
+    /* contenu lu : comparaison à la trame suivante (sauf écriture de l'Oric
+     * d'ici là : 2 s plus tard, comme d'habitude) */
+    if (lu && s_calme < 0) s_calme = DISQUETTE_DELAI_TRAMES - 1;
+    __sync_synchronize();
+    t->etat = TRAVAIL_LIBRE;
+}
 
-    if (echec) {
-        /* fichier dans un état inconnu : relu à la prochaine réécriture ;
-         * clé retirée pendant l'écriture : nouvel essai à son retour */
-        log_error("[port] %s: write-back failed", path);
-        sedoric_destroy(c->fichier);
-        c->fichier = NULL;
-        if (c->cle) c->attente = true;
-    } else if (n > 0) {
-        log_info("[port] %s: %d track(s) written back", path, n);
-    }
+/* Cœur 1 : la case remplie part au cœur 2 (réveillé par SEV, WFE dans
+ * CarteCoeur2) */
+static void lancer(void) {
+    __sync_synchronize();
+    s_travail.etat = TRAVAIL_DEMANDE;
+    __asm__ volatile ("dsb sy\n\tsev" ::: "memory");
+}
+
+bool disquette_coeur2_demande(void) {
+    return s_travail.etat == TRAVAIL_DEMANDE;
+}
+
+bool disquette_coeur2_sur_cle(void) {
+    return s_travail.etat == TRAVAIL_DEMANDE && s_travail.sur_cle;
+}
+
+void disquette_coeur2(void) {
+    if (s_travail.etat != TRAVAIL_DEMANDE) return;
+    __sync_synchronize();
+    executer(&s_travail);
+    __sync_synchronize();
+    s_travail.etat = TRAVAIL_FINI;
 }
 
 void disquette_service(emulator_t* emu) {
+    /* Réécriture finie par le cœur 2 : journal, case libre */
+    if (s_travail.etat == TRAVAIL_FINI) recueillir(&s_travail);
+
     /* Écritures de la dernière trame (drapeaux remis à zéro par le port :
      * LOCI ne lit pas disk_modified, Phosphoric ne lit disk_dirty qu'à la
      * sortie) */
@@ -260,6 +487,10 @@ void disquette_service(emulator_t* emu) {
             }
         }
     }
+    if (ecrit) s_calme = 0;
+    /* Réécriture en cours sur le cœur 2 : rien d'autre */
+    if (s_travail.etat != TRAVAIL_LIBRE) return;
+
     /* Disquette nouvellement montée : sa clé est relevée tout de suite */
     for (int d = 0; d < NB_LECTEURS; d++) {
         const loci_t* l = &emu->loci;
@@ -269,12 +500,9 @@ void disquette_service(emulator_t* emu) {
         if (emu->card_on[CARD_IDX_microdisc] && disk && disk->data && s_microdisc_path[d])
             associer(&s_microdisc[d], disk->data, s_microdisc_path[d]);
     }
-    if (ecrit) {
-        s_calme = 0;
-        return;
-    }
+    if (ecrit) return;
     if (s_calme >= 0 && ++s_calme >= DISQUETTE_DELAI_TRAMES) {
-        disquette_flush(emu);
+        if (preparer_tout(emu)) lancer();
         return;
     }
     /* Pistes en attente d'une clé retirée : nouvel essai régulier */
@@ -283,7 +511,7 @@ void disquette_service(emulator_t* emu) {
         attente = attente || s_loci[d].attente || s_microdisc[d].attente;
     if (attente && ++s_attente >= DISQUETTE_ATTENTE) {
         s_attente = 0;
-        disquette_flush(emu);
+        if (preparer_tout(emu)) lancer();
     }
 }
 
@@ -342,7 +570,7 @@ bool disquette_montee_sous(emulator_t* emu, const char* dir) {
 }
 
 void disquette_flush_attente(emulator_t* emu) {
-    bool attente = s_calme >= 0;
+    bool attente = s_calme >= 0 || s_travail.etat != TRAVAIL_LIBRE;
     for (int d = 0; d < NB_LECTEURS; d++)
         attente = attente || s_loci[d].attente || s_microdisc[d].attente;
     if (attente) disquette_flush(emu);
@@ -354,22 +582,18 @@ unsigned disquette_reecritures(void) {
 }
 
 void disquette_flush(emulator_t* emu) {
-    s_calme = -1;
-
-    /* Disquettes de LOCI (dsk_image : secteurs à plat, comme sedoric_load) */
-    for (int d = 0; d < NB_LECTEURS; d++) {
-        const loci_t* l = &emu->loci;
-        if (emu->card_on[CARD_IDX_loci] && l->dsk_image[d] && !l->dsk_web[d] && l->dsk_host_path[d][0])
-            sauver(&s_loci[d], l->dsk_image[d], l->dsk_image_size[d], l->dsk_host_path[d]);
-        else
-            oublier(&s_loci[d]);
+    /* Réécriture du cœur 2 : sa fin attendue (quelques dizaines de ms) */
+    while (s_travail.etat == TRAVAIL_DEMANDE) {
     }
-    /* Disquettes du Microdisc (disk=) */
-    for (int d = 0; d < NB_LECTEURS; d++) {
-        const sedoric_disk_t* disk = emu->disks[d];
-        if (emu->card_on[CARD_IDX_microdisc] && disk && disk->data && s_microdisc_path[d])
-            sauver(&s_microdisc[d], disk->data, disk->size, s_microdisc_path[d]);
-        else
-            oublier(&s_microdisc[d]);
+    if (s_travail.etat == TRAVAIL_FINI) recueillir(&s_travail);
+
+    /* Sur place : contenu des fichiers lu s'il manque, puis pistes écrites */
+    for (int passe = 0; passe < 2; passe++) {
+        if (!preparer_tout(emu)) break;
+        bool lecture = false;
+        for (int i = 0; i < s_travail.nb; i++) lecture = lecture || s_travail.el[i].charger;
+        executer(&s_travail);
+        recueillir(&s_travail);
+        if (!lecture) break;
     }
 }

@@ -16,12 +16,14 @@
 /* Chemins des .dsk du Microdisc (disk=), Phosphoric ne les garde pas. */
 void disquette_set_microdisc_path(int drive, const char* path);
 
-/* Cœur 1, à la fin de chaque trame : note les écritures, réécrit les pistes
- * modifiées après DISQUETTE_DELAI_TRAMES trames sans écriture. */
+/* Cœur 1, à la fin de chaque trame : note les écritures ; après
+ * DISQUETTE_DELAI_TRAMES trames sans écriture, relève les pistes modifiées
+ * et en demande la réécriture au cœur 2 (journal à une trame suivante). */
 void disquette_service(emulator_t* emu);
 
-/* Réécrit tout de suite ce qui a changé (avant un redémarrage). L'émulation
- * doit être arrêtée (entre deux trames). */
+/* Réécrit tout de suite ce qui a changé (avant un redémarrage), sur place,
+ * après la fin d'une réécriture du cœur 2. L'émulation doit être arrêtée
+ * (entre deux trames). */
 void disquette_flush(emulator_t* emu);
 
 /* Même chose, seulement si des pistes attendent (écriture de l'Oric depuis
@@ -42,5 +44,14 @@ bool disquette_montee_sous(emulator_t* emu, const char* dir);
  * depuis n'importe quel cœur : une lecture faite pendant que la valeur est
  * restée la même et paire n'a croisé aucune réécriture. */
 unsigned disquette_reecritures(void);
+
+/* Cœur 2 (CarteCoeur2, carte.cpp) : une réécriture demandée ? (lisible de
+ * tout cœur) ; disquette_coeur2 l'exécute (rien si aucune). */
+bool disquette_coeur2_demande(void);
+void disquette_coeur2(void);
+
+/* Réécriture demandée ou en cours sur une clé USB (branchements reportés,
+ * cœur 0 entre deux trames) */
+bool disquette_coeur2_sur_cle(void);
 
 #endif /* DISQUETTE_H */

@@ -735,6 +735,19 @@ unsigned oric_machine_disk_writes(void) {
     return disquette_reecritures();
 }
 
+/* [port] Réécriture des disquettes par le cœur 2 (disquette.c, CarteCoeur2) */
+bool oric_machine_disk_job_pending(void) {
+    return disquette_coeur2_demande();
+}
+
+void oric_machine_disk_job_run(void) {
+    disquette_coeur2();
+}
+
+bool oric_machine_disk_job_on_key(void) {
+    return disquette_coeur2_sur_cle();
+}
+
 /* [port] Texte d'une clé dans la liste des périphériques de LOCI
  * (op_readdir_dev, « N: status » comme loci_add_usb_device). Appelé
  * entre deux trames : le cœur 1 ne lit pas la liste en même temps. */

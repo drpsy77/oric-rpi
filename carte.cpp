@@ -339,34 +339,64 @@ static void Executer (TTravail *t)
 	}
 }
 
+// Le cœur 2 réécrit aussi les disquettes : pistes relevées par le cœur 1
+// (disquette.c, sa propre case), passées avant un fichier en attente
 void CarteCoeur2 (void)
 {
 	while (true)
 	{
-		// WFE : réveillé par le SEV du cœur 0, ou par un autre (libération
-		// d'un verrou tournant de Circle) : la case est relue à chaque fois
-		while (s_Travail.nEtat != EtatDemande)
+		// WFE : réveillé par le SEV du cœur 0 ou du cœur 1, ou par un autre
+		// (libération d'un verrou tournant de Circle) : les cases sont
+		// relues à chaque fois
+		while (   s_Travail.nEtat != EtatDemande
+		       && !oric_machine_disk_job_pending ())
 		{
 			WaitForEvent ();
 		}
 		DataMemBarrier ();
-		Executer (&s_Travail);
-		DataMemBarrier ();
-		s_Travail.nEtat = EtatFini;
+		oric_machine_disk_job_run ();		// rien si aucune
+		if (s_Travail.nEtat == EtatDemande)
+		{
+			DataMemBarrier ();
+			Executer (&s_Travail);
+			DataMemBarrier ();
+			s_Travail.nEtat = EtatFini;
+		}
 	}
 }
 
 bool CarteCoeur2SurCle (void)
 {
-	return    s_Travail.nEtat == EtatDemande
-	       && strncmp (s_Travail.pChemin, "SD:", 3) != 0;
+	return    (   s_Travail.nEtat == EtatDemande
+		   && strncmp (s_Travail.pChemin, "SD:", 3) != 0)
+	       || oric_machine_disk_job_on_key ();
 }
 
 void CarteCoeur2Attendre (void)
 {
-	while (s_Travail.nEtat == EtatDemande)
+	while (s_Travail.nEtat == EtatDemande || oric_machine_disk_job_pending ())
 	{
-		// fin du morceau en cours, puis du fichier
+		// fin du morceau en cours, puis du fichier ; réécriture de disquettes
+	}
+	DataMemBarrier ();
+}
+
+// Tâche du cœur 0 : cœur 1 entre deux trames (il y reste tant que la tâche
+// ne rend pas la main), et pas de réécriture de disquette sur le cœur 2 :
+// elle pourrait viser le fichier lu, effacé ou renommé (disquette tout juste
+// démontée). Attendue d'abord en rendant la main ; une autre, demandée par
+// le cœur 1 juste avant d'arrêter, sans rendre la main (quelques dizaines de
+// ms : le cœur 2 ne fait rien d'autre, la case de la carte est à
+// l'appelant).
+static void AttenteTrame (void)
+{
+	while (oric_machine_disk_job_pending ())
+	{
+		CScheduler::Get ()->Yield ();
+	}
+	(*s_pAttenteTrame) ();
+	while (oric_machine_disk_job_pending ())
+	{
 	}
 	DataMemBarrier ();
 }
@@ -435,7 +465,7 @@ static bool Lecture (const char *pChemin, u8 **ppAlloue, u8 *pTampon, unsigned n
 	}
 
 	Prendre ();
-	(*s_pAttenteTrame) ();
+	AttenteTrame ();
 	bool bMontee = oric_machine_disk_mounted (pChemin);
 	if (bMontee)
 	{
@@ -449,7 +479,7 @@ static bool Lecture (const char *pChemin, u8 **ppAlloue, u8 *pTampon, unsigned n
 		bool bCoeur2 = nEssai < LECTURE_ESSAIS;
 		if (!bCoeur2)
 		{
-			(*s_pAttenteTrame) ();
+			AttenteTrame ();
 		}
 		unsigned nEcritures = oric_machine_disk_writes ();
 
@@ -569,7 +599,7 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 	Prendre ();
 
 	// Refus tout de suite, sans écrire (entre deux trames)
-	(*s_pAttenteTrame) ();
+	AttenteTrame ();
 	unsigned nSerie, nBranchement = 0;
 	int nCle = cles_usb_etat (pChemin, &nSerie, &nBranchement);
 	bool bCle = nCle >= 0;
@@ -605,7 +635,7 @@ bool CarteEcrire (const char *pChemin, const u8 *pDonnees, unsigned nTaille,
 
 	// La fin entre deux trames, sans rendre la main : LOCI a pu monter la
 	// disquette, la clé a pu être retirée pendant l'écriture
-	(*s_pAttenteTrame) ();
+	AttenteTrame ();
 	if (Refuse (pChemin, bCle, nBranchement, &pRaison, &pTexte, pCode))
 	{
 		f_unlink (New);
@@ -691,7 +721,7 @@ const char *CarteTexte (TCarteCode Code)
 
 static void Trame (void)
 {
-	(*s_pAttenteTrame) ();
+	AttenteTrame ();
 }
 
 static int CompareEntrees (const void *p1, const void *p2)

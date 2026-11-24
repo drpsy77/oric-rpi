@@ -72,6 +72,13 @@ bool oric_machine_disk_mounted_under(const char* dir);
  * (cœur 2, carte.cpp) n'en a croisé aucune. */
 unsigned oric_machine_disk_writes(void);
 
+/* Réécriture des disquettes (pistes changées) demandée par le cœur 1 au
+ * cœur 2 : en attente ou en cours ? (tout cœur) ; exécution (cœur 2,
+ * CarteCoeur2) ; sur une clé USB ? (branchements reportés) */
+bool oric_machine_disk_job_pending(void);
+void oric_machine_disk_job_run(void);
+bool oric_machine_disk_job_on_key(void);
+
 /* Clé USB key (0, 1) branchée ou retirée (cœur 0, entre deux trames) :
  * nouveau texte dans la liste des périphériques de LOCI (sans « N: »).
  * Numéro « N: » de la clé, 0 si elle n'est pas servie. */

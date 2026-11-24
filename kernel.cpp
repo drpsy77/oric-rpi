@@ -127,7 +127,7 @@ void CEmuCores::Run (unsigned nCore)
 	}
 	else if (nCore == 2)
 	{
-		CarteCoeur2 ();		// fichiers de TFTP et de la page web (carte.cpp)
+		CarteCoeur2 ();		// fichiers du réseau (carte.cpp), disquettes (disquette.c)
 	}
 }
 
