@@ -35,9 +35,9 @@ STDLIB=$PWD
 (cd libs/circle/addon/wlan && ./makeall --nosample clean && \
  EXTRAINCLUDE="-isystem $STDLIB/install/arm-none-circle/include" ./makeall --nosample)
 
-# 2. cloner Phosphoric (version validée : acfeacc, 2.31.15)
+# 2. cloner Phosphoric (version validée : 0434aa7, 2.31.25)
 git clone https://github.com/benedictemarty/Phosphoric.git phosphoric
-cd phosphoric && git checkout acfeacc && cd ..
+cd phosphoric && git checkout 0434aa7 && cd ..
 
 # 3. importer ses sources dans ce dépôt (crée le dossier phosphoric/)
 cd <ce dépôt>

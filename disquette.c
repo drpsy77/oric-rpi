@@ -6,11 +6,16 @@
  * Phosphoric src/storage/sedoric.c (fonctions statiques, © 2026 bmarty,
  * EUPL-1.2, voir SOURCES.md).
  *
- * Phosphoric charge chaque .dsk en mémoire (secteurs à plat) et ne le
- * réécrit qu'à la sortie de l'émulateur : loci_dsk_flush (LOCI, jamais pour
- * une MFM_DISK : « session-only ») ou à la fermeture (Microdisc). Sur la Pi,
- * on coupe le courant : rien n'est jamais réécrit. Le vrai LOCI écrit sur la
- * clé au fil de l'eau.
+ * Phosphoric charge chaque .dsk en mémoire (secteurs à plat). Le Microdisc
+ * ne le réécrit qu'à la sortie de l'émulateur (--disk-writeback) : sur la Pi,
+ * on coupe le courant, rien n'est jamais réécrit. Le vrai LOCI écrit sur la
+ * clé au fil de l'eau ; Phosphoric aussi depuis 2.31.17 (loci_dsk_sync, à la
+ * fin de chaque commande d'écriture), mais par stdio, sur le cœur 1 : sur la
+ * Pi, chaque secteur écrit par l'Oric ouvrirait, écrirait et fermerait le
+ * fichier par FatFs pendant la trame (l'Oric arrêté, comme avant le travail
+ * du cœur 2), et une clé retirée perdrait ses écritures. Le port neutralise
+ * cette réécriture (« Réécriture de LOCI » plus bas) et garde la sienne pour
+ * LOCI comme pour le Microdisc.
  *
  * Le port garde pour chaque disquette l'état de son fichier (sedoric_load :
  * secteurs à plat et conteneur MFM). DISQUETTE_DELAI_TRAMES trames après la
@@ -35,6 +40,7 @@
 #include "disquette.h"
 #include "cles.h"
 #include "storage/sedoric.h"
+#include "storage/disk.h"
 #include "utils/logging.h"
 
 #include <fatfs/ff.h>
@@ -467,16 +473,61 @@ void disquette_coeur2(void) {
     s_travail.etat = TRAVAIL_FINI;
 }
 
+/* ── Réécriture de LOCI (Phosphoric 2.31.17) neutralisée ─────────────── */
+/* [port] loci_dsk_sync (loci_bus.c, statique) réécrit le fichier à la fin de
+ * chaque commande d'écriture : loci_dsk_flush compare l'image à sa copie
+ * dsk_shadow et écrit les secteurs changés (fopen, fwrite, fclose sur le
+ * cœur 1), puis remet disk_modified à faux. Trois détournements (--wrap,
+ * Makefile), appelés depuis d'autres fichiers de Phosphoric :
+ *   - loci_dsk_open (MOUNT, locidisk=) : dsk_shadow libérée après le
+ *     montage ; sans elle, loci_dsk_flush ne fait rien (Phosphoric le
+ *     prévoit : malloc refusé) ;
+ *   - loci_dsk_tick (io_bus.c) : contrôleur seulement, comme avant 2.31.17,
+ *     sans loci_dsk_sync : disk_modified reste vrai jusqu'à disquette_service ;
+ *   - loci_dsk_write (card_loci.c) : son loci_dsk_sync final peut remettre
+ *     disk_modified à faux (dernier octet, interruption forcée) ; une commande
+ *     d'écriture vue avant ou après l'appel est notée dans s_loci_ecrit.
+ * Une écriture notée de trop ne coûte qu'une comparaison. Proposé à bmarty :
+ * point 10 de docs/phosphoric-f8.md. */
+static bool s_loci_ecrit;
+
+static bool fdc_en_ecriture(const fdc_t* fdc) {
+    return fdc->disk_modified || fdc->currentop == FDC_OP_WRITE_SECTOR ||
+           fdc->currentop == FDC_OP_WRITE_SECTORS || fdc->currentop == FDC_OP_WRITE_TRACK;
+}
+
+bool __real_loci_dsk_open(loci_t* loci, uint8_t drive, const char* host_path);
+bool __wrap_loci_dsk_open(loci_t* loci, uint8_t drive, const char* host_path) {
+    bool ok = __real_loci_dsk_open(loci, drive, host_path);
+    if (drive < NB_LECTEURS) {
+        free(loci->dsk_shadow[drive]);
+        loci->dsk_shadow[drive] = NULL;
+    }
+    return ok;
+}
+
+void __wrap_loci_dsk_tick(loci_t* loci, int cycles) {
+    fdc_ticktock(&loci->dsk_fdc, (unsigned)cycles);
+}
+
+void __real_loci_dsk_write(loci_t* loci, uint16_t address, uint8_t value);
+void __wrap_loci_dsk_write(loci_t* loci, uint16_t address, uint8_t value) {
+    bool avant = fdc_en_ecriture(&loci->dsk_fdc);
+    __real_loci_dsk_write(loci, address, value);
+    if (avant || fdc_en_ecriture(&loci->dsk_fdc)) s_loci_ecrit = true;
+}
+
 void disquette_service(emulator_t* emu) {
     /* Réécriture finie par le cœur 2 : journal, case libre */
     if (s_travail.etat == TRAVAIL_FINI) recueillir(&s_travail);
 
     /* Écritures de la dernière trame (drapeaux remis à zéro par le port :
-     * LOCI ne lit pas disk_modified, Phosphoric ne lit disk_dirty qu'à la
-     * sortie) */
+     * la réécriture de LOCI est neutralisée, voir plus haut ; Phosphoric ne
+     * lit disk_dirty qu'à la sortie) */
     bool ecrit = false;
-    if (emu->card_on[CARD_IDX_loci] && emu->loci.dsk_fdc.disk_modified) {
+    if (emu->card_on[CARD_IDX_loci] && (emu->loci.dsk_fdc.disk_modified || s_loci_ecrit)) {
         emu->loci.dsk_fdc.disk_modified = false;
+        s_loci_ecrit = false;
         ecrit = true;
     }
     if (emu->card_on[CARD_IDX_microdisc]) {

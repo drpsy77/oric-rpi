@@ -1,10 +1,29 @@
 # Signalement pour Phosphoric : ACIA de LOCI (pertes, cadence), disquettes jamais réécrites, montage au démarrage, +++ du modem, cassette sous ROMDIS, démarrage de LOCI (MIA_BOOT)
 
-À envoyer à bmarty. Constaté sur le port Circle (Pi 3B+) et sur Phosphoric
-natif (Linux) ; les cinq points sont revus sur **Phosphoric 2.31.15**
-(commit `acfeacc`) : `acia6551.c`, `card_acia.c`, `loci_bus.c` et
-`sedoric.c` n'ont pas changé depuis 2.30.0, où ils ont été observés ; le
-point 5 est observé sur 2.31.15.
+Points 1 à 6 envoyés à bmarty (issue #98), tous corrigés ; points 7 à 10
+pas encore envoyés. Points 1 à 9 constatés sur le port Circle (Pi 3B+) et
+sur Phosphoric natif (Linux), revus sur **Phosphoric 2.31.15** (commit
+`acfeacc`). Point 10 : nouveau, vu sur **2.31.25** (`0434aa7`).
+
+## Bilan après 2.31.25 (27/11/2026)
+
+| Point | Phosphoric | Port |
+|---|---|---|
+| 1. ACIA de LOCI : pertes | **corrigé en 2.31.22** : contre-pression d'office sous `--loci`, picowifi, ACIA en $0380 | file de 256 octets et contre-pression du port retirées |
+| 2. ACIA de LOCI : cadence | **corrigé en 2.31.24** : sans cadence d'office, `--loci-acia-pacing` la rétablit | `__wrap_acia_write` retiré ; `modemcadence=1` passe `--loci-acia-pacing` |
+| 3. Disquettes jamais réécrites | **corrigé en 2.31.17**, MFM_DISK compris, à la fin de chaque commande d'écriture | réécriture du port gardée ; celle de Phosphoric neutralisée sur la Pi : voir point 10 |
+| 4. Montage au démarrage | **fait en 2.31.23** : `--loci-mount D:CHEMIN` | `locidisk.c` retiré ; `locidisk=` appelle `loci_mount_drive` et `loci_startup_boot` (copie de `main_loci_mounts`) |
+| 5. `+++` sur ligne calme | **corrigé en 2.31.20** (picowifi), 2.31.21 (modem Hayes) : garde en cycles | `esc_send` retiré |
+| 6. Cassette sous ROMDIS | **corrigé** (8b61dfb) : garde dans `tape_patches` et le chaînage du BASIC ; proposition 2 (pas d'interception sans cassette) non reprise | condition du port retirée |
+| 7. Débordement de la dernière instruction | pas encore envoyé | contournement gardé |
+| 8. Retrait d'une clé USB | pas encore envoyé | contournement gardé |
+| 9. MIA_BOOT | pas encore envoyé | contournement gardé |
+| 10. Réécriture des disquettes sur le fil de l'émulation | nouveau, pas encore envoyé | contournement ajouté |
+
+Vérifié au banc natif sur 2.31.25 (sans aucun réglage du port) : CP/A
+démarré par `--loci-mount A:0:/cpa.dsk` ; `REMOTE`, `REMOTE OFF` (« +++
+escape », « hangup »), `REMOTE` de nouveau ; 1040 caractères collés dans
+`EDIT` sans perte, aucun OVERRUN.
 
 ## Déjà corrigé en 2.31.6 (merci)
 
@@ -23,6 +42,9 @@ le menu s'affiche, RETURN rend CP/A avec son écran, qui répond ensuite. Le
 contournement du port pour F8 est retiré.
 
 ## 1. L'ACIA de LOCI perd des octets (console à distance de CP/A)
+
+**Corrigé en 2.31.22.**
+
 
 Reproduit avec Phosphoric natif (Linux), sans le port : `--loci --serial
 picowifi:x`, CP/A (`cpa.dsk`) puis `REMOTE 127.0.0.1:2325` vers `remote.py
@@ -51,6 +73,9 @@ et active la contre-pression avec le modem.
 
 ## 2. L'ACIA de LOCI est cadencée comme une vraie 6551
 
+**Corrigé en 2.31.24.**
+
+
 Phosphoric cadence l'ACIA sur le débit de son registre de contrôle : à 9600
 bauds, ~1040 cycles par octet reçu et ~1180 par octet envoyé. Le vrai LOCI
 n'a pas cette limite : son ACIA est dans le firmware et le modem (Pico W) est
@@ -71,6 +96,9 @@ Contournement dans le port : `acia_write` détourné par l'éditeur de liens
 
 ## 3. Les disquettes de LOCI ne sont jamais réécrites
 
+**Corrigé en 2.31.17** (voir le point 10 pour le port).
+
+
 `loci_dsk_open` (`src/io/loci_bus.c`) charge le `.dsk` en mémoire ; les
 écritures de l'Oric ne vont que dans cette copie. `loci_dsk_flush` ne la
 réécrit qu'au démontage ou à l'arrêt de LOCI, et jamais pour une `MFM_DISK`
@@ -89,6 +117,9 @@ pistes qui diffèrent du fichier sont réinjectées (copie de
 
 ## 4. Pas de montage d'une disquette de LOCI au démarrage
 
+**Fait en 2.31.23** (`--loci-mount`).
+
+
 Pour démarrer sur une disquette avec LOCI, il faut passer par le menu à
 chaque fois (choisir l'image, puis Échap). Une option du genre
 `--loci-mount A:0:/cpa.dsk` (montage, configuration du menu en XRAM, puis
@@ -96,6 +127,9 @@ chaque fois (choisir l'image, puis Échap). Une option du genre
 `locidisk.c` avec `resolve_path`, `loci_dsk_open` et `loci_rom_swap_cb`.
 
 ## 5. Le picowifi ne reconnaît pas « +++ » sur une ligne calme
+
+**Corrigé en 2.31.20.**
+
 
 `picowifi_send` (`src/io/serial_picowifi.c`) ne prend un « + » pour
 l'échappement que si `pw->silence >= 50`, remis à 0 à chaque octet envoyé.
@@ -122,6 +156,9 @@ précédés de 50 appels à `recv`, dont les octets éventuels sont gardés et
 rendus à l'ACIA avant les autres.
 
 ## 6. Les interceptions de la cassette visent aussi la RAM overlay
+
+**Corrigé** (8b61dfb, proposition 1).
+
 
 `tape_patches` (`src/io/tape_patches.c`), appelé avant chaque instruction,
 compare seulement le PC aux adresses de la ROM BASIC (`rom_patches.c`). La
@@ -265,3 +302,33 @@ charge qu'une fois : dès que le PC atteint la préparation de `CLOAD""`
 BASIC (« Ready »), comme sur un Atmos avec un magnétophone. Vérifié en natif
 (même logique ajoutée pour l'essai) avec une cassette dont le programme
 finit par `JMP ($FFFC)`. Pour revenir à CP/A : le menu de LOCI.
+
+
+## 10. Réécriture des disquettes de LOCI sur le fil de l'émulation
+
+2.31.17 réécrit le `.dsk` à la fin de chaque commande d'écriture
+(`loci_dsk_sync`, appelé par `loci_dsk_tick` et `loci_dsk_write`) :
+`fopen`, secteurs changés, `fclose`, sur le fil de l'émulation. Sur un PC,
+le cache du système le rend invisible. Sur le port (Pi sans système), chaque
+ouverture et fermeture passe par FatFs et la carte SD pendant la trame :
+quelques millisecondes à plusieurs dizaines par commande, et une copie sous
+CP/A en fait des centaines. L'Oric et le son s'arrêtent : c'est ce que le
+port avait déjà supprimé en confiant ses réécritures à un autre cœur. Il
+garde aussi les écritures d'une disquette dont la clé USB est retirée,
+jusqu'au retour de la même clé (point 8).
+
+Proposition, sans changer le comportement par défaut : laisser l'hôte faire
+la réécriture lui-même. Par exemple, un rappel
+`loci_set_dsk_writeback_callback(loci, cb, ctx)` appelé à la place de
+`loci_dsk_flush` à la fin d'une commande d'écriture, ou une option qui
+désactive la réécriture (`disk_modified` restant alors vrai pour l'hôte,
+comme avant 2.31.17).
+
+Contournement dans le port (`disquette.c`, « Réécriture de LOCI ») : trois
+`--wrap`. `loci_dsk_open` libère `dsk_shadow` après le montage :
+`loci_dsk_flush` ne fait plus rien, comme quand `malloc` échoue.
+`loci_dsk_tick` ne fait avancer que le contrôleur, sans `loci_dsk_sync`.
+`loci_dsk_write` note une commande d'écriture vue avant ou après l'appel,
+car le `loci_dsk_sync` final remet `disk_modified` à faux. Vérifié en
+natif (`COPY` sous CP/A) : Phosphoric seul réécrit le `.dsk`, avec les trois
+détournements il reste intact et les écritures sont notées.

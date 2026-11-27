@@ -20,7 +20,7 @@ include $(CIRCLESTDLIB)/Config.mk
 PHOSPHORIC_SRC = $(sort $(wildcard phosphoric/src/*.c phosphoric/src/*/*.c))
 PHOSPHORIC_OBJS = $(PHOSPHORIC_SRC:.c=.o)
 
-OBJS	= main.o kernel.o oric_machine.o phosphoric_stubs.o newlib_compat.o journal.o netrelay.o disquette.o locidisk.o carte.o tftp.o mdns.o web.o dav.o cles.o $(PHOSPHORIC_OBJS)
+OBJS	= main.o kernel.o oric_machine.o phosphoric_stubs.o newlib_compat.o journal.o netrelay.o disquette.o carte.o tftp.o mdns.o web.o dav.o cles.o $(PHOSPHORIC_OBJS)
 
 # Phosphoric utilise <stdatomic.h> (C11) ; Circle compile en gnu99 par défaut.
 # circle-stdlib place les en-têtes C++ avant ceux de GCC : avec GCC >= 13, un
@@ -48,8 +48,9 @@ NETRELAY_WRAP = socket connect bind listen accept getsockname getsockopt \
 		setsockopt recv send poll getaddrinfo _read _write _close _fcntl
 LDFLAGS += $(foreach f,$(NETRELAY_WRAP),--wrap=$(f))
 
-# ACIA sans cadence, comme le vrai LOCI (oric_machine.c, __wrap_acia_write)
-LDFLAGS += --wrap=acia_write
+# Réécriture des disquettes de LOCI par Phosphoric (cœur 1, stdio) neutralisée :
+# celle du port (cœur 2) la remplace (disquette.c, « Réécriture de LOCI »)
+LDFLAGS += --wrap=loci_dsk_open --wrap=loci_dsk_tick --wrap=loci_dsk_write
 # Démarrage de LOCI comme le firmware : ROM BASIC visible, chargement
 # automatique de la cassette (oric_machine.c, __wrap_loci_rom_swap_cb)
 LDFLAGS += --wrap=loci_rom_swap_cb

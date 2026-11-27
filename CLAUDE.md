@@ -35,7 +35,7 @@ abandonné (un cœur, trop lent avec LOCI, gel).
 
 ```
 /home/pi/Projets/circle-stdlib   clone neuf, ./configure -r 3 -o ARM_ALLOW_MULTI_CORE
-/home/pi/Projets/phosphoric      clone, commit validé acfeacc (2.31.15)
+/home/pi/Projets/phosphoric      clone, commit validé 0434aa7 (2.31.25)
 /home/pi/Projets/oric-rpi        ce dépôt
 /home/pi/Projets/cpa-oric        CP/A, console à distance (remote.py, vitrine)
 ```
@@ -99,8 +99,9 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
 - avec LOCI : `loci=1`, **sans** `rom=` (la ROM système est le menu) ;
   `oric/loci/` = flash « 0: » (`locirom`, `basic11b.rom`, `microdis.rom`),
   `oric/usb/` = clé « 1: » (`.dsk`, `.tap`) ; le menu ne voit rien d'autre ;
-- `modem=1` : modem Wi-Fi de LOCI ; ACIA sans cadence (`modemcadence=1`
-  pour la cadence de Phosphoric, 9600 bauds). Avec le modem, il est « 1: » et
+- `modem=1` : modem Wi-Fi de LOCI ; ACIA sans cadence, avec contre-pression
+  (défaut de Phosphoric depuis 2.31.24 ; `modemcadence=1` :
+  `--loci-acia-pacing`, 9600 bauds). Avec le modem, il est « 1: » et
   la clé devient « 2: » (sans lui, la clé est « 1: ») : « 0: » est le seul
   repère fixe.
 - `reseau=ethernet` (défaut `wifi`) : liaison de la Pi pour `modem=1` et
@@ -182,7 +183,8 @@ Avec le modem : `firmware/` et `wpa_supplicant.conf` (modèle `sdcard/`).
   la 1ʳᵉ à sa place ; branchement et retrait à chaud (voir point 8 des
   prochaines étapes).
 - `locidisk=0:/cpa-en.dsk` (avec `loci=1`) : image en A: de LOCI, démarrage
-  direct sans le menu ; F8 montre le menu avec A: rempli. Essayé sur le banc
+  direct sans le menu ; F8 montre le menu avec A: rempli. `--loci-mount A:`
+  de Phosphoric (2.31.23 ; `main_loci_mounts` repris dans `oric_machine.c`). Essayé sur le banc
   natif (CP/A démarre, `USBMOUNT` voit A:, `USBMOUNT C: x.DSK` depuis la clé
   marche). `USBMOUNT` refuse les images de 0: (le vrai LOCI s'y est figé) :
   les disquettes en plus vont sur la clé.
@@ -218,8 +220,7 @@ activité la plus longue du cœur 0, MHz, °C, état du firmware),
 |---|---|
 | `kernel.cpp/.h` | cœur 0 : clavier et souris USB, son HDMI, réseau (Wi-Fi ou Ethernet), température, cadence 50 Hz, F12 ; cœur 1 : émulation et affichage (`pixels=`, `couleurs=`) ; cœur 2 : `CarteCoeur2` |
 | `oric_machine.c/.h` | colle extraite de `main.c` de Phosphoric, API C opaque |
-| `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture) : relevé par le cœur 1 entre deux trames, lecture et écriture du fichier par le cœur 2 |
-| `locidisk.c/.h` | `locidisk=0:/x.dsk` : A: de LOCI monté, XRAM du menu, démarrage direct (comme le menu puis Échap) |
+| `disquette.c/.h` | réécriture des `.dsk` modifiés (pistes changées, 2 s après la dernière écriture) : relevé par le cœur 1 entre deux trames, lecture et écriture du fichier par le cœur 2 ; réécriture de LOCI par Phosphoric neutralisée (`--wrap`) |
 | `journal.cpp/.h` | journal en mémoire (verrou entre cœurs), écrit par le cœur 0 |
 | `netrelay.cpp/.h` | sockets et `_close` du cœur 1 exécutés par le cœur 0 (`--wrap`) |
 | `tftp.cpp/.h` | serveur TFTP de la carte SD (`tftp=`), tâche du cœur 0 |
@@ -312,6 +313,16 @@ activité la plus longue du cœur 0, MHz, °C, état du firmware),
   renommé). Banc natif (fil pour le cœur 2, FatFs sur POSIX) : MFM et
   brut, LOCI et Microdisc, écriture de l'Oric pendant le travail,
   `disquette_flush` : fichier identique à `sedoric_save`.
+- **Réécriture de LOCI par Phosphoric neutralisée** (2.31.17, 27/11/2026) :
+  Phosphoric réécrit le `.dsk` à la fin de chaque commande d'écriture
+  (`loci_dsk_sync` : `fopen`/`fclose` par stdio sur le cœur 1, l'Oric
+  arrêté à chaque secteur sur la Pi, clé retirée non gérée). `[port]`
+  `disquette.c` : `--wrap` de `loci_dsk_open` (`dsk_shadow` libérée :
+  `loci_dsk_flush` ne fait rien), `loci_dsk_tick` (contrôleur seul, sans
+  `loci_dsk_sync`) et `loci_dsk_write` (commande d'écriture notée dans
+  `s_loci_ecrit`, `disk_modified` étant remis à faux). Vérifié au banc natif
+  (`COPY` sous CP/A : `.dsk` intact, écritures notées). Point 10 de
+  `docs/phosphoric-f8.md`.
 - **Ordonnanceur** : `CStdlibAppNetwork` crée un `CScheduler`, cœur 0
   seulement. circle-newlib y rend la main dans les sockets **et dans
   `_close`** : d'où `netrelay.cpp`, qui exécute ces appels du cœur 1 sur le
@@ -324,15 +335,11 @@ activité la plus longue du cœur 0, MHz, °C, état du firmware),
   et envoie la file de 4 Ko remplie par le cœur 1 ; `poll`/`read`/`write` du
   cœur 1 ne voient que les files (un écrivain, un lecteur, `DataMemBarrier`).
   `close` : le cœur 0 envoie le reste puis ferme.
-- ACIA sans cadence : `[port]` dans `oric_machine.c`, `acia_write` détourné
-  (`--wrap`) ; `rx_reload`/`tx_reload` remis à 1 après chaque écriture.
-- `+++` du modem : `[port]` `esc_send` dans `oric_machine.c` (`send`, `poll`,
-  `recv` du backend remplacés). Le picowifi compte son silence en appels de
-  `recv`, que l'ACIA ne fait que si un octet est arrivé : `+++` de `REMOTE
-  OFF` jamais reconnu. Un « + » après 1 s sans émission (cycles), puis deux
-  autres à moins de 1 s, reçoivent 50 appels de `recv` (octets gardés et
-  rendus avant les autres). Vérifié sur le banc natif (copie de Phosphoric,
-  même code sous `PORT_ESC`) : REMOTE, REMOTE OFF (hangup), REMOTE.
+- ACIA du modem (`--loci`, picowifi en $0380) : contre-pression (un octet,
+  le suivant reste dans le modem) et sans cadence par Phosphoric lui-même
+  (2.31.22, 2.31.24) ; `+++` reconnu sur une ligne calme (2.31.20, garde en
+  cycles). Les contournements du port (file de 256 octets, contre-pression,
+  `__wrap_acia_write`, `esc_send`) sont retirés depuis le 27/11/2026.
 - Sockets de circle-newlib : pas de `O_NONBLOCK` (fcntl → ENOSYS) ; le relais
   le mémorise et lit par `recv(MSG_DONTWAIT)`. DNS de Circle (`CDNSClient`) :
   serveur de la box seulement, qui ne connaît ni les noms `.local` ni ceux
@@ -402,18 +409,19 @@ activité la plus longue du cœur 0, MHz, °C, état du firmware),
   unimplemented` (TCP_NODELAY) est sans effet.
 - Corrections qui l'ont permis : pilote Wi-Fi recompilé (`jmp_buf`, voir
   Leçons) ; relais : tampon de 1600 octets par socket (Circle rend un segment
-  entier par lecture) ; `[port]` dans `oric_machine_init` : `--serial-buffer
-  256` et contre-pression de l'ACIA (`acia_set_rx_backpressure`).
+  entier par lecture) ; file de l'ACIA et contre-pression (aujourd'hui
+  faites par Phosphoric).
 - Phosphoric passé de 2.30.0 (675cb06) à 2.31.15 (acfeacc), 05/11/2026 :
   F8 sous CP/A et Entrée du menu (reprise de session) corrigés en amont
   (2.31.6), vérifiés sur le banc natif (CP/A, `--control`, `loci-button`) ;
   contournement F8 du port retiré ; `loci_resume.ost` n'est plus écrit ;
   imprimante : STROBE sur PB4 (2.31.4) reporté dans `oric_machine.c`.
-- Défauts de Phosphoric restant dans `docs/phosphoric-f8.md` (à envoyer à
-  bmarty) : ACIA de LOCI qui écrase les octets non lus (contourné), ACIA
-  cadencée (contourné), disquettes non réécrites (contourné), pas de
-  montage au démarrage (`locidisk`), `+++` non reconnu sur une ligne calme
-  (contourné), cassette interceptée sous ROMDIS (contourné), débordement
+- Phosphoric passé à 2.31.25 (0434aa7), 27/11/2026 : bmarty a corrigé les
+  points 1 à 6 de `docs/phosphoric-f8.md` (issue #98, les seuls envoyés) ; contournements du
+  port retirés (ACIA, `+++`, `locidisk.c`, cassette), bilan en tête du
+  document. Vérifié au banc natif sur 2.31.25 : `--loci-mount`, REMOTE,
+  REMOTE OFF, REMOTE, 1040 caractères collés dans EDIT sans perte.
+- Défauts de Phosphoric restant dans `docs/phosphoric-f8.md` : débordement
   de la dernière instruction de chaque trame perdu (point 7, contourné ;
   VSYNC.COM de CP/A), MIA_BOOT qui laisse la RAM overlay en place (CP/A
   redémarre au lieu du BASIC après `USBMOUNT x.TAP /B`) et ignore le
@@ -421,7 +429,8 @@ activité la plus longue du cœur 0, MHz, °C, état du firmware),
   `__wrap_loci_rom_swap_cb`, octets du firmware de LOCI, 19/11/2026 ;
   vérifié sur la 3B+ ; chargement une seule fois, `ald_once`, 20/11/2026 :
   un `JMP ($FFFC)` en fin de programme mène au BASIC, pas à un nouveau
-  `CLOAD""`).
+  `CLOAD""`), clés USB de LOCI (point 8, contourné), réécriture des
+  disquettes de LOCI sur le cœur 1 (point 10, neutralisée).
   Les mêmes corrections, en patchs de Phosphoric, sont dans `bureau/`.
 - **Réseau sans retirer la carte, vérifié sur la 3B+ (16/11/2026)** : la Pi
   répond à `oric.local` (10.0.0.23) ; `tftp=cyberlab.local` résolu par mDNS
@@ -429,29 +438,34 @@ activité la plus longue du cœur 0, MHz, °C, état du firmware),
   noyau envoyé par TFTP (1,25 Mo en ~56 s, vitrine en marche) et relu
   identique. Mise à jour : `tftp -m binary oric.local -c put
   kernel8-32.img`, puis Ctrl+Alt+Suppr.
-- Disquettes : Phosphoric ne réécrit un `.dsk` qu'à la sortie (jamais une
-  MFM_DISK servie par LOCI) ; sur la Pi, jamais. `[port]` `disquette.c` :
-  pistes changées réécrites sur place 2 s après la dernière écriture (banc
-  natif : identique à `sedoric_save`) ; 3ᵉ point de `docs/phosphoric-f8.md`.
+- Disquettes : Phosphoric ne réécrit un `.dsk` du Microdisc qu'à la sortie
+  (sur la Pi, jamais) ; ceux de LOCI à chaque commande d'écriture depuis
+  2.31.17, sur le cœur 1 (neutralisé, voir Points techniques). `[port]`
+  `disquette.c` : pistes changées réécrites sur place 2 s après la dernière
+  écriture, par le cœur 2 (banc natif : identique à `sedoric_save`).
 
 ## Banc d'essai natif (sans la Pi)
 
 Phosphoric compilé pour Linux (`make -j4` dans une **copie** de
-`/home/pi/Projets/phosphoric`, binaire `oric1-emu`), même `cpa-en.dsk` (copiée en `cpa.dsk`),
-`basic11b.rom`, `microdis.rom` (copiés depuis la carte, `oric/loci/`) :
+`/home/pi/Projets/phosphoric`, **après `rm -rf build`** : sinon les objets
+copiés passent pour à jour ; binaire `phosphoric` dans `build/*/bin/`), même
+`cpa-en.dsk` (copiée en `flash/cpa.dsk`), `locirom`, `basic11b.rom`,
+`microdis.rom` dans `flash/` (copiés depuis la carte, `oric/loci/`) :
 
 ```
 python3 tools/remote.py serve --port 2325 --http 8041 --log essai.log &   # dans cpa-oric
-HOME=. oric1-emu -n --realtime --no-config -m atmos -r basic11b.rom \
-  --disk-rom microdis.rom --disk cpa.dsk --loci --loci-flash flash --loci-usb usb \
-  --serial picowifi:x --serial-buffer 256 --serial-trace trace.txt \
+HOME=. phosphoric -n --realtime --no-config -m atmos -r flash/locirom \
+  --loci --loci-flash flash --loci-usb usb --loci-mount A:0:/cpa.dsk \
+  --serial picowifi:x --serial-trace trace.txt \
   --type-keys "15000000:R\p1E\p1M...\p1\n" -c 110000000 \
   --screenshot-text-at 100000000:ecran.txt
 python3 tools/remote.py --demon http://localhost:8041 coller texte.txt    # pendant l'appel
 ```
 
-- Taper `REMOTE 127.0.0.1:2325` lettre par lettre (`\p1` entre chaque) :
-  sinon CP/A perd des touches au démarrage.
+- Taper `REMOTE 127.0.0.1:2325` lettre par lettre (`\p1` entre chaque,
+  `\pN` = N secondes émulées ; plusieurs `--type-keys` possibles) : sinon
+  CP/A perd des touches au démarrage. Collage : `EDIT ESSAI.TXT` puis
+  `coller texte.txt` (`remote.py --demon ... ecran` pour relire l'écran).
 - **Avec LOCI** (`--loci`) : sans lui, CP/A prend l'ACIA d'Oricutron ($031C)
   et compose sans « - » : mode telnet, non représentatif.
 - `trace.txt` : chaque octet, et « OVERRUN » si un octet est écrasé.
@@ -460,10 +474,10 @@ python3 tools/remote.py --demon http://localhost:8041 coller texte.txt    # pend
 - Bouton Action sans fenêtre : `--control` (commandes `continue`, `pause`,
   `keys DIR\n`, `loci-button`, `read BB80 460` pour l'écran texte) ;
   `--loci-menu-at` ne sert qu'avec le vrai firmware (co-simulation).
-- La contre-pression et le transfert sans cadence n'ont pas d'option :
-  essais faits en ajoutant dans la copie de Phosphoric un test de variable
-  d'environnement (`card_acia.c` après `acia_set_backend` ; `acia6551.c`
-  `acia_update_timing`, `baud = 0`). Ne jamais modifier le clone.
+- Contre-pression et transfert sans cadence : défauts de Phosphoric sous
+  `--loci` avec le picowifi (`--loci-acia-pacing` pour la cadence). Essai
+  d'un `--wrap` du port : relier les objets de `build/` avec un `.c` du
+  brouillon (`-Wl,--wrap=...`). Ne jamais modifier le clone.
 
 ## Prochaines étapes
 
@@ -476,9 +490,9 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    vrai LOCI (ACIA du firmware, USB) n'en a pas. Mesuré sur le banc natif
    (collage de 980 caractères, contre-pression) : écran complet 5,6 s → 1,9 s,
    police 5,4 s → 2,3 s, écran après collage 3,4 s → 0,6 s, aucune perte.
-   **Fait (05/11/2026), en service (vitrine)** : `[port]` par `--wrap` de
-   `acia_write` (`oric_machine.c`), option `modemcadence=1` ; 2ᵉ point de
-   `docs/phosphoric-f8.md`.
+   **Fait (05/11/2026), en service (vitrine)** ; fait par Phosphoric
+   depuis 2.31.24 (`modemcadence=1` : `--loci-acia-pacing`), contournement
+   retiré le 27/11/2026.
 2. **Lecture anticipée par le cœur 0**, indispensable avec le point 1 : sans
    cadence, l'ACIA interroge le modem toutes les 32 cycles (`poll` relayé :
    des dizaines de milliers d'allers-retours par seconde). Le cœur 0 lirait
@@ -487,7 +501,11 @@ que l'émulateur fait moins bien est à remonter à bmarty.
    écrivain et un lecteur), sans relais pour `poll` ni `recv`. **Fait
    (05/11/2026), en service** : files de réception et d'émission dans
    `netrelay.cpp` (voir Points techniques).
-3. Envoyer `docs/phosphoric-f8.md` à bmarty (Pierre).
+3. Points 1 à 6 de `docs/phosphoric-f8.md` envoyés à bmarty (issue #98),
+   corrigés en 2.31.17-2.31.25. Points 7, 8, 9 et le nouveau point 10
+   (réécriture des disquettes de LOCI sur le fil de l'émulation) pas
+   encore envoyés (Pierre). `bureau/` (patchs sur acfeacc) à refaire sur
+   2.31.25 : patchs 3, 5, 7, 8 et 10 devenus inutiles, 12 en partie (LOCI).
 4. Pour CP/A : « LOCI allégé » (API fichiers seule, servie depuis la SD).
 5. Ouverts : pas de menu de choix des supports sans LOCI ; `scaling_kernel=8`
    à essayer.

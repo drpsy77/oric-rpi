@@ -38,7 +38,8 @@
 //                                 (LAN7515), sans firmware/ ni wpa_supplicant ;
 //                                 cmdline.txt seulement (pas oric.cfg)
 //   modemcadence=1                ACIA du modem cadencée sur son débit (9600
-//                                 bauds) ; défaut 0 : sans cadence, comme LOCI
+//                                 bauds, --loci-acia-pacing) ; défaut 0 : sans
+//                                 cadence, comme LOCI
 //   clesusb=apres|remplace|non    avec loci=1 : vraies clés USB de la Pi (deux,
 //                                 FAT ou exFAT) servies par LOCI après lociusb
 //                                 (défaut), ou la 1re à sa place ; branchement
@@ -46,7 +47,8 @@
 //   (souris USB : avec loci=1, vue par l'API de LOCI, comme une souris
 //    branchée sur la cartouche ; branchement et retrait à chaud)
 //   locidisk=0:/cpa-en.dsk        avec loci=1 : image montée en A: de LOCI et
-//                                 démarrage direct dessus (sans le menu)
+//                                 démarrage direct dessus, sans le menu
+//                                 (--loci-mount A:... de Phosphoric)
 //   ntp=pool.ntp.org              avec modem=1 : serveur de l'heure (dates
 //                                 des fichiers écrits sur la carte SD)
 //   fuseau=CET-1CEST,M3.5.0,M10.5.0/3  fuseau horaire, règle POSIX de TZ

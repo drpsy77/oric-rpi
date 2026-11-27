@@ -30,7 +30,7 @@
 #include "rom_patches.h"
 #include "utils/logging.h"
 #include "disquette.h"
-#include "locidisk.h"
+#include "io/loci_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -336,31 +336,7 @@ static bool load_tape(emulator_t* emu, const char* tape_file) {
     return emu->tape_loaded;
 }
 
-/* ── [port] ACIA sans cadence (ajout du port) ──────────────────────────── */
-/* Phosphoric cadence l'ACIA sur le débit de son registre de contrôle (9600
- * bauds : ~1040 cycles par octet reçu, ~1180 par octet envoyé). Le vrai LOCI
- * n'en a pas : son ACIA est dans le firmware et le modem est sur l'USB. Il
- * n'y a pas d'option : acia_update_timing (statique) recalcule rx_reload et
- * tx_reload à chaque écriture du registre de contrôle ou de commande. Le port
- * détourne donc acia_write (--wrap, voir Makefile) et remet les deux au
- * minimum après chaque écriture : c'est le transfert instantané de Phosphoric
- * (débit 0), où la réception interroge le modem toutes les 32 cycles
- * (ACIA_RX_POLL_FLOOR). Signalé à bmarty (docs/phosphoric-f8.md). */
-static bool s_acia_free;
 static int s_key_number[ORIC_MAX_KEYS];  /* [port] numéro « N: » de chaque clé USB */
-
-static void acia_no_cadence(acia6551_t* acia) {
-    acia->rx_reload = 1;
-    acia->tx_reload = 1;
-    if (acia->tx_cycles > 1) acia->tx_cycles = 1;
-    if (acia->rx_cycles > 1) acia->rx_cycles = 1;
-}
-
-void __real_acia_write(acia6551_t* acia, uint16_t addr, uint8_t value);
-void __wrap_acia_write(acia6551_t* acia, uint16_t addr, uint8_t value) {
-    __real_acia_write(acia, addr, value);
-    if (s_acia_free) acia_no_cadence(acia);
-}
 
 /* ── Instance unique de la machine (main() : « emulator_t emu; ») ─────── */
 /* [port] ~2,6 Mo réservés dans le tas, pas dans la BSS : le noyau entier
@@ -379,75 +355,6 @@ static emulator_t* oric_emu(void) {
 }
 #define s_emu (*oric_emu())
 
-/* ── [port] +++ du modem reconnu comme par un modem Hayes (ajout du port) ─ */
-/* Le picowifi de Phosphoric (picowifi_send) ne prend un « + » pour
- * l'échappement que si son compteur de silence atteint 50 depuis l'octet
- * envoyé précédent. Or ce compteur avance dans picowifi_recv, que l'ACIA
- * n'appelle que lorsqu'un octet est arrivé : il compte des octets reçus, pas
- * du temps. Ligne calme, « +++ » envoyé d'affilée (REMOTE OFF de CP/A) :
- * jamais reconnu, le modem reste en ligne et l'AT suivant part vers l'hôte
- * (« No answer from the modem »). Le vrai Pico W reconnaît « +++ » après une
- * seconde de silence. Le port détourne send, poll et recv du modem : un « + »
- * envoyé après une seconde sans émission (temps de l'Oric, en cycles), puis
- * les deux suivants rapprochés, sont précédés d'appels à recv qui donnent au
- * modem le silence attendu ; les octets que ces appels retirent du modem sont
- * gardés dans une file et rendus à l'ACIA avant les autres. Signalé à bmarty
- * (docs/phosphoric-f8.md, point 5). */
-#define ESC_GUARD_CYCLES  1000000          /* 1 s (S12 = 50, en 1/50 s) */
-#define ESC_SILENCE       50               /* seuil de picowifi_send */
-
-static bool (*s_modem_send)(serial_backend_t*, uint8_t);
-static bool (*s_modem_recv)(serial_backend_t*, uint8_t*);
-static bool (*s_modem_poll)(serial_backend_t*);
-static uint64_t s_esc_last_tx;             /* cycle du dernier octet envoyé */
-static int s_esc_plus;                     /* « + » de l'échappement en cours */
-static uint8_t s_esc_held[256];            /* octets retirés au modem */
-static unsigned s_esc_in, s_esc_out;
-
-static void esc_give_silence(serial_backend_t* self) {
-    for (int i = 0; i < ESC_SILENCE; i++) {
-        uint8_t byte;
-        if (s_esc_in - s_esc_out >= sizeof s_esc_held) break;
-        if (s_modem_recv(self, &byte))
-            s_esc_held[s_esc_in++ % sizeof s_esc_held] = byte;
-    }
-}
-
-static bool esc_send(serial_backend_t* self, uint8_t byte) {
-    uint64_t now = s_emu.cpu.cycles;
-    bool quiet = now - s_esc_last_tx >= ESC_GUARD_CYCLES;
-    if (byte == '+' && (s_esc_plus == 0 ? quiet : s_esc_plus < 3 && !quiet)) {
-        s_esc_plus++;
-        esc_give_silence(self);
-    } else {
-        s_esc_plus = 0;
-    }
-    s_esc_last_tx = now;
-    return s_modem_send(self, byte);
-}
-
-static bool esc_poll(serial_backend_t* self) {
-    return s_esc_in != s_esc_out || (s_modem_poll && s_modem_poll(self));
-}
-
-static bool esc_recv(serial_backend_t* self, uint8_t* byte) {
-    if (s_esc_in != s_esc_out) {
-        *byte = s_esc_held[s_esc_out++ % sizeof s_esc_held];
-        return true;
-    }
-    return s_modem_recv(self, byte);
-}
-
-static void esc_hook(serial_backend_t* modem) {
-    if (!modem || !modem->send || !modem->recv) return;
-    s_modem_send = modem->send;
-    s_modem_recv = modem->recv;
-    s_modem_poll = modem->poll;
-    modem->send = esc_send;
-    modem->recv = esc_recv;
-    modem->poll = esc_poll;
-}
-
 /* ── [port] Démarrage de LOCI (MIA_BOOT) comme le firmware (ajout du port) ─ */
 /* op_mia_boot (loci_boot.c) charge la ROM BASIC par loci_rom_swap_cb, qui
  * remet le 6502 à zéro, mais laisse ROMDIS et la RAM overlay en place : lancé
@@ -461,8 +368,8 @@ static void esc_hook(serial_backend_t* modem) {
  * tape_patches les remplacent) et, avec le chargement automatique, deux
  * modifications qui exécutent CLOAD"" à la fin du démarrage à froid. Le port
  * détourne loci_rom_swap_cb (--wrap, voir Makefile ; appelée par MIA_BOOT,
- * pointeur pris dans card_loci.c, et par locidisk.c, Microdisc sans
- * cassette : même état final) : ROM BASIC rendue visible, modifications du firmware
+ * pointeur pris dans card_loci.c ; aussi par loci_startup_boot, démarrage
+ * de locidisk=, Microdisc sans cassette : même état final) : ROM BASIC rendue visible, modifications du firmware
  * pour le chargement automatique, nouvelle remise à zéro. Signalé à bmarty
  * (docs/phosphoric-f8.md, point 9). */
 
@@ -508,7 +415,7 @@ static uint8_t s_ald_orig[3];             /* saut d'origine (JMP vers READY) */
  * pas la RAM overlay) ; sinon le saut reste en place pour plus tard. */
 static void ald_once(emulator_t* emu) {
     uint8_t* jump = &emu->memory.rom[s_ald_jump - 0xC000];
-    if (emu->memory.basic_rom_disabled || !emu->memory.rom_enabled ||
+    if (!memory_basic_rom_visible(&emu->memory) ||
         memcmp(jump, s_ald_patch, sizeof s_ald_orig) != 0)
         return;
     memcpy(jump, s_ald_orig, sizeof s_ald_orig);
@@ -612,13 +519,11 @@ bool oric_machine_init(const oric_media_t* media) {
         for (int i = 0; opts[i].name; i++) {
             if (strcmp(opts[i].name, "serial") == 0)
                 card_modules_set_option(cfg.card_cfg, opts[i].val, media->serial);
-            /* [port] --serial-buffer 256 : sans file, l'ACIA de Phosphoric
-             * écrase l'octet non lu (OVERRUN) et le pilote de CP/A, qui
-             * scrute l'ACIA, perd la moitié de chaque demande de la console
-             * à distance. Le vrai LOCI ne prend au modem que ce que l'Oric
-             * a lu (docs/phosphoric-f8.md, point 1). */
-            if (strcmp(opts[i].name, "serial-buffer") == 0)
-                card_modules_set_option(cfg.card_cfg, opts[i].val, "256");
+            /* Sous --loci, picowifi en $0380 : contre-pression et ACIA sans
+             * cadence d'office (Phosphoric 2.31.22 et 2.31.24, points 1 et 2
+             * de docs/phosphoric-f8.md) ; modemcadence=1 : cadence rétablie. */
+            if (media->serial_cadence && strcmp(opts[i].name, "loci-acia-pacing") == 0)
+                card_modules_set_option(cfg.card_cfg, opts[i].val, NULL);
         }
     }
 
@@ -628,22 +533,6 @@ bool oric_machine_init(const oric_media_t* media) {
 
     /* main_setup_serial_cards (ACIA 6551 et son modem) */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_SERIAL) != 0) return false;
-    /* [port] Contre-pression : file de l'ACIA pleine, l'octet reste dans le
-     * modem, qui cesse alors de lire la liaison TCP. Comme le vrai LOCI, qui
-     * ne prend au modem que ce que l'Oric a lu. Sans elle, un texte collé
-     * dans la console à distance perd des lettres (OVERRUN, FIFO full).
-     * card_acia.c ne l'active que pour --serial tcp: (docs/phosphoric-f8.md). */
-    if (media->serial && emu->card_on[CARD_IDX_acia])
-        acia_set_rx_backpressure(&emu->acia, true);
-    /* [port] ACIA sans cadence (voir __wrap_acia_write) */
-    if (media->serial && emu->card_on[CARD_IDX_acia] && !media->serial_cadence) {
-        s_acia_free = true;
-        acia_no_cadence(&emu->acia);
-        log_info("ACIA: no baud-rate cadence (port, like the real LOCI)");
-    }
-    /* [port] +++ après une seconde de silence (voir esc_send) */
-    if (media->serial && emu->card_on[CARD_IDX_acia])
-        esc_hook(emu->acia.backend);
 
     /* main_setup_loci */
     if (card_modules_setup(emu, &cfg, CARD_STAGE_LOCI) != 0) return false;
@@ -688,12 +577,25 @@ bool oric_machine_init(const oric_media_t* media) {
     if (card_modules_setup(emu, &cfg, CARD_STAGE_DISKS_EARLY) != 0) return false;
     if (card_modules_setup(emu, &cfg, CARD_STAGE_DISKS) != 0) return false;
 
-    /* [port] Démarrage direct sur une disquette de LOCI (locidisk.c), au
-     * lieu du menu ; en cas d'échec, le menu reste la ROM système. */
-    if (emu->card_on[CARD_IDX_loci] && media->loci_disk &&
-        !locidisk_boot(emu, media->loci_disk, media->serial != NULL)) {
-        if (!memory_load_rom(&emu->memory, media->rom_file, 0)) return false;
-        loci_patch_rom_info(emu);
+    /* main.c : main_loci_mounts (--loci-mount A:CHEMIN, Phosphoric 2.31.23) :
+     * montage comme MOUNT, réglages du menu en XRAM, démarrage sur le
+     * Microdisc de LOCI sans passer par le menu. [port] lecteur A: seul
+     * (locidisk=) ; en cas d'échec, le menu reste la ROM système (main.c
+     * arrête l'émulateur). */
+    if (emu->card_on[CARD_IDX_loci] && media->loci_disk) {
+        uint16_t err = loci_mount_drive(&emu->loci, 0, media->loci_disk);
+        if (err) {
+            log_error("--loci-mount A:%s: cannot mount (LOCI errno %u)", media->loci_disk, err);
+        } else {
+            log_info("--loci-mount: drive A = %s", media->loci_disk);
+            /* BASIC of the machine; with the menu ROM as -r, the menu's default (1.1). */
+            bool menu_rom = media->rom_file && strstr(media->rom_file, "locirom");
+            if (!loci_startup_boot(&emu->loci, menu_rom || emu->model == ORIC_MODEL_ATMOS)) {
+                log_error("--loci-mount: boot failed (BASIC or microdis.rom not found)");
+                if (!memory_load_rom(&emu->memory, media->rom_file, 0)) return false;
+                loci_patch_rom_info(emu);
+            }
+        }
     }
 
     /* emulator_run : power-on reset */
@@ -826,16 +728,11 @@ void oric_machine_run_frame(void) {
     while (emu->raster_cycle < CYCLES_PER_FRAME && !emu->cpu.halted) {
         /* [port] breakpoint, debugger, trace, profiler supprimés */
 
-        /* [port] interceptions de la cassette seulement si la ROM BASIC est
-         * visible : sous ROMDIS (Microdisc, LOCI), le code de la RAM overlay
-         * (CP/A) passant en $E75A était pris pour un CSAVE (point 6 de
-         * docs/phosphoric-f8.md). */
         /* [port] chargement automatique de LOCI une seule fois (ald_once) */
         if (s_ald_setup && emu->cpu.PC == s_ald_setup)
             ald_once(emu);
 
-        if (!emu->memory.basic_rom_disabled && emu->memory.rom_enabled)
-            tape_patches(emu);
+        tape_patches(emu);
 
         /* Jasmin autoboot trap (gardé : la carte Jasmin fait partie du noyau) */
         if (emu->card_on[CARD_IDX_jasmin] && !emu->jasmin.autoboot_done && !emu->jasmin.romdis) {
@@ -854,7 +751,8 @@ void oric_machine_run_frame(void) {
         /* [port] LOCI idle poll supprimé */
 
         if (emu->tape_readbyte_active && emu->rom_patches &&
-            emu->cpu.PC == emu->rom_patches->cload_data_rts) {
+            emu->cpu.PC == emu->rom_patches->cload_data_rts &&
+            memory_basic_rom_visible(&emu->memory)) {
             if (emu->memory.ram[emu->rom_patches->tape_type_addr] == 0x00) {
                 basic_rechain(&emu->memory);
             }
